@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# git-salvage PATH shim. Placed ahead of the real git on PATH: for a command
+# that can destroy uncommitted work it runs `git salvage _pre <argv>` first,
+# then always execs the real git with the unmodified argv. Spec: docs/DESIGN.md.
+# Runs on every git invocation (an IDE's polling too): keep it small, and keep
+# it bash 3.2 compatible (macOS /bin/bash).
+
+# Finds the real git: GIT_SALVAGE_REAL_GIT, else the first `git` on PATH that
+# is not this shim (neither the same file nor a file in this directory).
+find_real_git() {
+	local self=$0 selfdir d IFS=:
+	case $self in */*) ;; *) self=$(command -v -- "$self") ;; esac
+	selfdir=$(cd -P -- "${self%/*}" 2>/dev/null && pwd -P)
+	if [ -n "${GIT_SALVAGE_REAL_GIT:-}" ] && [ -x "$GIT_SALVAGE_REAL_GIT" ] &&
+		! [ "$GIT_SALVAGE_REAL_GIT" -ef "$self" ]; then
+		REAL_GIT=$GIT_SALVAGE_REAL_GIT
+		return 0
+	fi
+	set -f
+	for d in $PATH; do
+		[ -n "$d" ] || d=.
+		[ -f "$d/git" ] && [ -x "$d/git" ] || continue
+		[ "$d/git" -ef "$self" ] && continue
+		[ "$(cd -P -- "$d" 2>/dev/null && pwd -P)" = "$selfdir" ] && continue
+		REAL_GIT=$d/git
+		break
+	done
+	set +f
+	[ -n "$REAL_GIT" ]
+}
+
+REAL_GIT=
+if ! find_real_git; then
+	printf '%s\n' "git-salvage: cannot find the real git on PATH" >&2
+	exit 1
+fi
+
+# Inside git-salvage, or switched off: straight through.
+if [ "${GIT_SALVAGE_ACTIVE:-}" = 1 ] || [ "${GIT_SALVAGE_SKIP:-}" = 1 ]; then
+	exec "$REAL_GIT" "$@"
+fi
+
+# Global options (measured: dev/measure-globals.sh). GLOBALS keeps the ones
+# that change where the repository is or how config reads, for the _pre call.
+GLOBALS=()
+i=1
+while [ "$i" -le $# ]; do
+	a=${!i}
+	case $a in
+	-C | -c | --git-dir | --work-tree | --namespace | --config-env | --attr-source)
+		i=$((i + 1))
+		[ "$i" -le $# ] || exec "$REAL_GIT" "$@"
+		GLOBALS+=("$a" "${!i}")
+		;;
+	--git-dir=* | --work-tree=* | --namespace=* | --config-env=* | --attr-source=* | \
+		--exec-path=* | --bare | --literal-pathspecs | --glob-pathspecs | \
+		--noglob-pathspecs | --icase-pathspecs | --no-replace-objects | \
+		--no-lazy-fetch | --no-optional-locks | --no-advice)
+		GLOBALS+=("$a")
+		;;
+	-p | --paginate | -P | --no-pager) ;;
+	# git prints something and runs no subcommand.
+	--exec-path | --html-path | --man-path | --info-path | --list-cmds=* | \
+		-v | --version | -h | --help)
+		exec "$REAL_GIT" "$@"
+		;;
+	-*)
+		printf '%s\n' "git-salvage: unrecognized option '$a', no snapshot taken" >&2
+		exec "$REAL_GIT" "$@"
+		;;
+	*) break ;;
+	esac
+	i=$((i + 1))
+done
+[ "$i" -le $# ] || exec "$REAL_GIT" "$@"
+
+# Non-destructive builtins the IDEs poll: no extra process at all. Everything
+# else goes to _pre, which also expands aliases.
+case ${!i} in
+status | log | diff | show | add | commit | fetch | push | pull | rev-parse | \
+	ls-files | ls-tree | cat-file | config | remote | tag | describe | blame | \
+	grep | shortlog | rev-list | for-each-ref | show-ref | symbolic-ref | \
+	update-index | diff-index | diff-files | diff-tree | merge-base | name-rev | \
+	reflog | init | clone | help | version | var | hash-object | check-ignore | \
+	check-attr | worktree | submodule | notes | format-patch | apply | mv | gc | \
+	fsck | count-objects | credential | bisect | repack | prune | maintenance | \
+	salvage)
+	exec "$REAL_GIT" "$@"
+	;;
+esac
+
+GIT_SALVAGE_REAL_GIT=$REAL_GIT "$REAL_GIT" --no-pager ${GLOBALS[@]+"${GLOBALS[@]}"} \
+	salvage _pre "${@:i}" </dev/null || exit 1
+exec "$REAL_GIT" "$@"
