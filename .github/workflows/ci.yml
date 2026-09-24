@@ -27,4 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pinned to the version used locally: the runner's older shellcheck
+      # (0.9) flags `[ a ] && [ b ] || c` (SC2015), which 0.11 accepts.
+      - name: install shellcheck
+        run: |
+          v=v0.11.0
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$v/shellcheck-$v.linux.x86_64.tar.xz" | tar -xJ
+          echo "$PWD/shellcheck-$v" >> "$GITHUB_PATH"
       - run: shellcheck --version && shellcheck bin/git-salvage shim/git tests/run.sh dev/*.sh
