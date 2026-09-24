@@ -100,6 +100,10 @@ test. So implementation + tests run in the MAIN conversation. reviewer
     failed spuriously.
 - Cold read round 2 (tail diff: the retry count): no findings. Not
   mutation-provable (probabilistic retry); accepted on the timing argument.
+- Committed 8f092ea, pushed. CI: tests green on ubuntu + macOS; shellcheck
+  failed on the runner's 0.9.0 (SC2015 on test-only `A && B || C`, accepted
+  by 0.11). CI now pins shellcheck 0.11.0 (a61c5a1): all green.
+- All "Next steps" below are done. Left: tag v0.1 and delete this file.
 
 ## Open issues (not fixed yet)
 - macOS: first exec of a freshly copied script costs 0.35-0.7 s (scan). One
