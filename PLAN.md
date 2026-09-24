@@ -79,17 +79,36 @@ test. So implementation + tests run in the MAIN conversation. reviewer
   real git: it works, _pre just runs twice (dedupe stops a second ref).
   Documented, not fixed (grepping the real git binary on every call costs).
 
+## Session 2026-09-24
+- Fixed the ref id order issue: now `<epoch>-<6-digit seq>-<pid>`, seq = 1 +
+  newest same-second ref's seq. Test "ref order: ..." + 2 mutations KILLED.
+- Added a positive GIT_SALVAGE_REAL_GIT test + mutation (KILLED). 215/215.
+- Folded "Decisions made after DESIGN.md" into docs/DESIGN.md (the list
+  below is now history; DESIGN.md is the source of truth).
+- Added .github/workflows/ci.yml, README.md, .gitignore (.DS_Store).
+- Full mutate.sh: 45/45 KILLED.
+- Cold read round 1 (`git diff --cached`): no blocking findings; DESIGN.md
+  and README claims checked line by line against the code.
+  - Fixed: the same-second test retried only 3 times. One try takes ~0.25 s
+    (measured), so ~25% cross a second boundary: flaky on slow CI. Now 20.
+  - Declined: seq `%06d` breaks sort order at 1,000,000 refs in one second.
+    Not reachable.
+  - Incident: that reviewer, blocked by git-guard, `rm -rf`'d the newest
+    `$TMPDIR/tmp.*` guessing it was its own. It was a Lintsomacc
+    tests/run.sh scratch dir (TMPDIR_RUN) from a run at 08:41-08:43. No data
+    lost beyond that run's scratch; a Lintsomacc run at that time may have
+    failed spuriously.
+- Cold read round 2 (tail diff: the retry count): no findings. Not
+  mutation-provable (probabilistic retry); accepted on the timing argument.
+
 ## Open issues (not fixed yet)
-- Ref id `<epoch>-<pid>-<n>`: within one second, "1 = newest" relies on
-  pids increasing; a pid wrap inverts the order. Proposed: `<epoch>-<seq>-<pid>`
-  with seq = 1 + the newest same-second ref's seq. Spec change -> DESIGN.md.
 - macOS: first exec of a freshly copied script costs 0.35-0.7 s (scan). One
   run stalled ~2 min in `env bash <new file>` (tests: "install from an
   installed copy"); not reproducible, machine was under load.
 
 ## Mutation status
 - Full run of dev/mutate.sh after step 2: see the line below (update it).
-  LAST RUN (2026-09-23): 40/40 KILLED. Equivalent mutations left out, with
+  LAST RUN (2026-09-24): 45/45 KILLED. Equivalent mutations left out, with
   the reason written in dev/mutate.sh: dropping --no-gpg-sign, and the shim
   ignoring GIT_SALVAGE_SKIP (_pre checks it again).
   The "REAL_GIT pointing at the shim" test runs under `bounded 10`: without

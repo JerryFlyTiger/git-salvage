@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: versions
+        run: |
+          git --version
+          /bin/bash --version | head -n 1
+      # /bin/bash: bash 3.2 on macOS, which is the compatibility target.
+      - name: tests
+        run: |
+          /bin/bash tests/run.sh | tee test.log
+          grep -Eq '^tests: ([0-9]+)/\1 passed$' test.log
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck --version && shellcheck bin/git-salvage shim/git tests/run.sh dev/*.sh

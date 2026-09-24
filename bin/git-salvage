@@ -91,11 +91,21 @@ trailer() { # <commit> <key>
 	git log -1 --format="%(trailers:key=$2,valueonly,separator=%x2C)" "$1"
 }
 
+# <epoch>-<seq>-<pid>: seq is one past the newest same-second ref's, so the
+# refname order is creation order even when pids wrap. The pid only keeps two
+# concurrent processes that pick the same seq from colliding.
 new_ref_name() {
-	local now n=0 name
-	now=$(date +%s)
+	local now n name last
+	now=$(printf '%010d' "$(date +%s)")
+	last=$(git for-each-ref --sort=-refname --count=1 --format='%(refname)' "$REF_PREFIX$now-*")
+	n=0
+	if [ -n "$last" ]; then
+		last=${last#"$REF_PREFIX$now-"}
+		last=${last%%-*}
+		case $last in '' | *[!0-9]*) ;; *) n=$((10#$last + 1)) ;; esac
+	fi
 	while :; do
-		name=$(printf '%s%010d-%010d-%04d' "$REF_PREFIX" "$now" "$$" "$n")
+		name=$(printf '%s%s-%06d-%010d' "$REF_PREFIX" "$now" "$n" "$$")
 		git show-ref -q --verify "$name" || break
 		n=$((n + 1))
 	done

@@ -382,6 +382,32 @@ printf 'r\n' >>tracked
 check "restore of the oldest kept snapshot at keep" git salvage restore 3
 check "restore of the oldest kept: content back" test "$(tail -n 1 tracked)" = 3
 
+# Same second, the older ref from a process with a higher pid (pid wrap):
+# the new ref must still sort newest. Retried if a second boundary falls
+# between the two snapshots.
+new_repo
+same_sec=
+for try in $(seq 1 20); do
+	git for-each-ref --format='delete %(refname)' refs/salvage/ | git update-ref --stdin
+	printf 'a%s\n' "$try" >>tracked
+	git salvage _pre reset --hard 2>/dev/null
+	a=$(git for-each-ref --format='%(refname)' refs/salvage/)
+	ea=${a#refs/salvage/}
+	ea=${ea%%-*}
+	git update-ref "refs/salvage/$ea-000000-9999999999" "$a" && git update-ref -d "$a"
+	printf 'b\n' >>tracked
+	git salvage _pre reset --hard 2>/dev/null
+	b=$(git for-each-ref --sort=-refname --count=1 --format='%(refname)' refs/salvage/)
+	eb=${b#refs/salvage/}
+	if [ "${eb%%-*}" = "$ea" ]; then
+		same_sec=1
+		break
+	fi
+done
+check "ref order: both snapshots in one second" test "$same_sec" = 1
+check "ref order: newer snapshot sorts first despite lower pid" test "$(git show "$b:worktree/tracked" | tail -n 1)" = b
+check "ref order: seq is one past the older ref's" test "$(printf '%s\n' "$b" | cut -d- -f2)" = 000001
+
 new_repo
 printf 'q\n' >>tracked
 check "saved line on stderr" sh -c 'git salvage _pre reset --hard 2>&1 >/dev/null | grep -qx "git-salvage: saved snapshot 1 (undo with: git salvage restore 1)"'
@@ -536,6 +562,9 @@ real_version=$("$REAL_GIT" --version)
 mkdir -p "$WORK/shimlink" && ln -s "$SHIMDIR/git" "$WORK/shimlink/git"
 check "shim: symlinked shim earlier on PATH is skipped" \
 	test "$(PATH="$WORK/shimlink:$SPATH" git --version 2>&1)" = "$real_version"
+mkdir -p "$WORK/fakegit" && printf '#!/bin/sh\necho "fake git $*"\n' >"$WORK/fakegit/git" && chmod +x "$WORK/fakegit/git"
+check "shim: GIT_SALVAGE_REAL_GIT is used" \
+	test "$(GIT_SALVAGE_REAL_GIT="$WORK/fakegit/git" env PATH="$SPATH" "$SHIMDIR/git" --version 2>&1)" = "fake git --version"
 # Accepting it would exec the shim forever: bounded, so that shows as a FAIL.
 check "shim: GIT_SALVAGE_REAL_GIT pointing at the shim is ignored" \
 	test "$(GIT_SALVAGE_REAL_GIT="$SHIMDIR/git" bounded 10 env PATH="$SPATH" "$SHIMDIR/git" --version 2>&1)" = "$real_version"

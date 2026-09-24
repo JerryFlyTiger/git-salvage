@@ -51,15 +51,24 @@ git-salvage (on PATH, reached through real git's external-command dispatch,
 - Recursion guard: git-salvage exports `GIT_SALVAGE_ACTIVE=1`; the shim, seeing
   it, immediately execs the real git with no parsing. Every `git` call inside
   git-salvage therefore reaches real git even though the shim is on PATH.
-- Finding real git (shim): `GIT_SALVAGE_REAL_GIT` if set; otherwise the first
+- git itself prepends its exec-path (`libexec/git-core`, which holds a `git`)
+  to PATH before running an external command (measured). So git-salvage's own
+  git calls reach real git even without the guard, and `doctor` skips that
+  PATH entry.
+- Finding real git (shim): `GIT_SALVAGE_REAL_GIT` if set (and not the shim
+  itself); otherwise the first
   executable `git` on PATH whose resolved directory is not the shim's own
   directory. If none is found, print `git-salvage: cannot find the real git on
   PATH` and exit 1.
 
 ## Storage format
 
-One ref per snapshot: `refs/salvage/<id>`, `id = <10-digit epoch>-<pid>-<n>`
-so that `for-each-ref --sort=-refname` is newest first. Refs under
+One ref per snapshot: `refs/salvage/<id>`,
+`id = <10-digit epoch>-<6-digit seq>-<10-digit pid>`, so that
+`for-each-ref --sort=-refname` is newest first. `seq` is one past the seq of
+the newest ref from the same second (0 if none), so the order within one
+second does not depend on pids, which can wrap. The pid only keeps two
+concurrent processes that pick the same seq from colliding. Refs under
 `refs/salvage/` are local only: neither `push` nor `clone`/`fetch` touch them
 by default.
 
@@ -90,13 +99,33 @@ cp "$GIT_DIR/index" "$tmp"; T_i=$(GIT_INDEX_FILE=$tmp git write-tree)  # may fai
 
 - `-f` (include ignored files) only when the triggering command will delete
   ignored files: `clean` with `-x` or `-X`.
+- A 0-byte `GIT_INDEX_FILE` is an error ("index file smaller than expected"),
+  so with no real index the temp file is deleted and git starts from none.
 - Run from the work-tree top level so `add -A` covers the whole tree.
 - **Skip (no ref, no output)** when there is nothing uncommitted:
   `T_w == T_i == HEAD^{tree}` (unborn HEAD: both equal the empty tree).
+  Untracked files only count as uncommitted for commands that can delete
+  them: `clean`, `reset --hard`, `checkout -f/--force`,
+  `switch -f/--force/--discard-changes`. Otherwise every branch switch with an
+  untracked file lying around would print a new snapshot. `git salvage
+  snapshot` and restore's own pre-restore snapshot always count them. When a
+  snapshot is taken, it always contains the untracked files.
 - **Skip** when `T_w`/`T_i` equal those of the newest existing worktree
   snapshot (repeated command on an unchanged tree).
 - Bare repository, or not inside a repository: no snapshot; the command runs
   and git reports whatever it reports.
+
+### Global options in the shim (measured, `dev/measure-globals.sh`)
+
+- `-C`, `-c` take the next word. `--git-dir`, `--work-tree`, `--namespace`,
+  `--config-env`, `--attr-source` take `=value` or the next word.
+- `--exec-path` (no `=`), `--html-path`, `--man-path`, `--info-path`,
+  `--list-cmds=`, `-v`/`--version`, `-h`/`--help` run no subcommand: exec at
+  once.
+- `-p`, `-P`, `--paginate`, `--no-pager` are not passed on to `_pre`; all other
+  globals are, so `_pre` sees the same repository as the command.
+- `_pre` runs with stdin from `/dev/null`: the command may still need stdin
+  (`reset --pathspec-from-file=-`).
 
 ## Which commands trigger what
 
@@ -120,7 +149,10 @@ snapshot. An argument after `--` is never read as an option.
 | `stash drop [<s>]`, `stash pop [<s>]` | always | stash (the entry being removed; default `stash@{0}`) |
 | `stash clear` | always | one stash record per entry |
 | `branch -d/-D/--delete <names>` | always (`-r`: `refs/remotes/`) | branch, one per existing name |
-| `branch -M/-C/-m/-c <old> <new>` | when `<new>` exists | branch (old tip of `<new>`) |
+| `branch -M/-C <old> <new>`, or `-m/-c` with `-f` | when `<new>` exists | branch (old tip of `<new>`) |
+
+Plain `-m`/`-c` refuse an existing `<new>` (exit 128, measured), so they
+record nothing without `-f`.
 
 Over-triggering is cheap (the skip rule makes a clean tree cost one `add -A`);
 under-triggering loses data. When in doubt, trigger.
@@ -165,6 +197,10 @@ Snapshots are numbered 1 = newest, in `list` order.
     working tree **without deleting anything** and **without touching the
     index**: `GIT_INDEX_FILE=<tmp> read-tree`, then `checkout-index -f -a` (or
     the given paths). Symlinks and the executable bit come back as saved.
+    Without paths, `checkout-index` runs from the top level: from a
+    subdirectory it would only write that subtree (measured). `checkout-index`
+    takes no directories, so `-- <path>` is expanded with `ls-files -z`
+    against the snapshot; paths are relative to the current directory.
   - `--index` additionally loads `index/` as the real index (refuse if that
     snapshot has `Salvage-Index: unmerged-not-captured`).
   - branch: `git branch <name> <tip>`; refuse if the branch exists.
@@ -175,8 +211,11 @@ Snapshots are numbered 1 = newest, in `list` order.
 - Automatic retention: after each new snapshot, keep the newest
   `salvage.keep` (default 200) and delete older refs.
 - `git salvage install [--dir D]` -- copy the shim to
-  `~/.local/share/git-salvage/bin/git` (or D) and print the one `PATH` line to
-  add to the shell profile. `git salvage uninstall` removes it. `git salvage
+  `~/.local/share/git-salvage/bin/git` (or D), and `git-salvage` beside it,
+  and print the one `PATH` line to add to the shell profile. One PATH entry
+  then reaches both: real git finds `git-salvage` through PATH for
+  `git salvage`. Install refuses to overwrite a `git` in D that is not the
+  shim. `git salvage uninstall` removes it. `git salvage
   doctor` reports: which `git` is first on PATH, whether it is the shim, and
   the real git it resolves to.
 
@@ -188,6 +227,13 @@ Snapshots are numbered 1 = newest, in `list` order.
 - Not covered: `worktree remove --force`, `checkout-index -f`, `read-tree -u`,
   `gc --prune=now`, `reflog expire`, and plain file operations outside git
   (`rm`, an editor overwriting a file).
+- Hooks run by git reach real git, not the shim: git puts its exec-path in
+  front of PATH (see "Components"). A hook that runs `git reset --hard` is
+  not caught.
+- A second *copy* (not a symlink) of the shim later on PATH is taken as the
+  real git. It still works; `_pre` just runs twice, and the same-state skip
+  stops a second ref. Detecting it would mean reading the real git binary on
+  every call.
 - Nested repositories inside untracked directories are recorded as gitlinks;
   their contents are not saved.
 - Snapshots keep large untracked files alive until pruned.

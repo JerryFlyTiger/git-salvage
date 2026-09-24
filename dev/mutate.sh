@@ -118,6 +118,11 @@ mut "retention off by one" $S 'retention: keep=3' \
 mut "quiet env ignored" $S 'GIT_SALVAGE_QUIET' \
 	's/\[ "\$\{GIT_SALVAGE_QUIET:-\}" = 1 \] && return 0/:/'
 
+mut "ref id: seq ignores same-second refs" $S 'ref order: newer snapshot|ref order: seq' \
+	's/\*\) n=\$\(\(10#\$last \+ 1\)\) ;;/*) n=0 ;;/'
+mut "ref id: pid before seq" $S 'ref order: seq' \
+	's/"\$REF_PREFIX" "\$now" "\$n" "\$\$"/"\$REF_PREFIX" "\$now" "\$\$" "\$n"/'
+
 # --- restore
 mut "restore -a runs from the cwd" $S 'restore from subdir: whole tree' \
 	's/\(cd "\$TOP" && GIT_INDEX_FILE=\$tmp git checkout-index -f -a\)/(GIT_INDEX_FILE=\$tmp git checkout-index -f -a)/'
@@ -148,6 +153,8 @@ mut "shim: reset in the fast path" $G 'shim: reset --hard saved' \
 	's/\nstatus \| log \|/\nreset | status | log |/'
 mut "shim: REAL_GIT pointing at itself accepted" $G 'GIT_SALVAGE_REAL_GIT' \
 	's/ &&\n\t\t! \[ "\$GIT_SALVAGE_REAL_GIT" -ef "\$self" \]; then/; then/'
+mut "shim: GIT_SALVAGE_REAL_GIT ignored" $G 'GIT_SALVAGE_REAL_GIT is used' \
+	's/if \[ -n "\$\{GIT_SALVAGE_REAL_GIT:-\}" \]/if false/'
 mut "shim: no unrecognized-option line" $G 'unrecognized option' \
 	's/\t\tprintf .%s\\n. "git-salvage: unrecognized option[^\n]*\n//'
 
