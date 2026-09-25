@@ -246,3 +246,8 @@ macOS plus `shellcheck`. Oracle = the real git: every destructive case asserts
 byte-for-byte; every transparency case runs the same command through the shim
 and through real git in twin repos and compares stdout, stderr (minus the one
 salvage line) and exit code.
+
+Known timing quirk (macOS, not fixed): the first exec of a freshly copied
+script costs 0.35-0.7 s (the OS scans it). One run stalled ~2 min in
+`env bash <new file>` ("install from an installed copy") while the machine
+was under load; not reproducible.
