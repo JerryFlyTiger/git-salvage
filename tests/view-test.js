@@ -203,12 +203,14 @@ var MEASURED = [
 MEASURED.forEach(function (m) {
 	test("explain: " + m[1], function () { return says(m[1], m[0], BR, m[2]); });
 });
-test("explain: detached HEAD, nothing said about a branch moving", function () {
-	var cases = [["commit: x", "no branch moved"], ["reset: moving to HEAD~1", "Moved the detached HEAD to HEAD~1"],
-		["merge main: Fast-forward", "HEAD just moved ahead"], ["cherry-pick: s1", "onto the detached HEAD"]];
+test("explain: no branch entry, nothing said about a branch or detaching", function () {
+	// A HEAD-only entry may be a detached HEAD, or a branch whose reflog is
+	// gone (deleted branch, Q4): the text must fit both.
+	var cases = [["commit: x", "Made a new commit \u201cx\u201d."], ["reset: moving to HEAD~1", "Moved HEAD to HEAD~1"],
+		["merge main: Fast-forward", "HEAD just moved ahead"], ["cherry-pick: s1", "onto HEAD,"]];
 	return cases.every(function (c) {
 		var t = explain(c[0], "HEAD", BR, false).text;
-		if (t.indexOf(c[1]) >= 0 && !/branch moved forward|current branch|the branch just/.test(t)) return true;
+		if (t.indexOf(c[1]) >= 0 && !/branch|detached/.test(t.replace(/Merged main/, ""))) return true;
 		OUT.push("#   " + JSON.stringify(c[0]) + " -> " + JSON.stringify(t));
 		return false;
 	});

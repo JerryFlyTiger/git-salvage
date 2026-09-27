@@ -522,7 +522,7 @@ check "view data: reflog of every ref, same count as git" \
 check "view data: snapshots newest first" test "$(grep '^P|' "$D" | cut -d'|' -f5)" = "$(printf 's2\ns1')"
 # The page numbers P records by order: that must be `git salvage list`'s order.
 check "view data: snapshot order = git salvage list" \
-	test "$(grep '^P|' "$D" | cut -d'|' -f5 | tr '\n' ' ')" = "$(git salvage list | sed 's/^ *[0-9]*  [^ ]* [^ ]*  [^ ]*  //; s/  ([0-9]* paths)$//' | tr '\n' ' ')"
+	test "$(grep '^P|' "$D" | cut -d'|' -f5 | tr '\n' ' ')" = "$(git salvage list | sed 's/^ *[0-9]*  [^ ]* [^ ]*  [^ ]*  *//; s/  ([0-9]* paths)$//' | tr '\n' ' ')"
 check "view data: snapshot fields" grep -qx "P|[^|]*|[0-9a-f]*|[0-9]*|s2|$(git rev-parse HEAD)|Salvage-Kind: worktree$(printf '\037')Salvage-Head: refs/heads/main" "$D"
 check "view: default output in .git" sh -c 'git salvage view --no-open >/dev/null && test -s .git/salvage-view.html'
 
@@ -541,6 +541,15 @@ for i in 1 2 3; do git commit -q --allow-empty -m "c$i"; done
 git salvage view -o "$WORK/v3.html" -n 2 --no-open >/dev/null
 view_decode "$WORK/v3.html" "$WORK/v3.data"
 check "view -n 2: two newest commits" test "$(grep '^C|' "$WORK/v3.data" | cut -d'|' -f6)" = "$(printf 'c3\nc2')"
+git salvage view -o "$WORK/v3.html" -n 02 --no-open >/dev/null
+view_decode "$WORK/v3.html" "$WORK/v3.data"
+check "view -n 02: read as 2" test "$(grep -c '^C|' "$WORK/v3.data")" = 2
+# base64 that does not end its output with a newline (as some may not):
+# the page must still have the data and the template's next line apart.
+mkdir -p "$WORK/b64" && printf '#!/bin/sh\nprintf %%s "$(%s "$@")"\n' "$(command -v base64)" >"$WORK/b64/base64" &&
+	chmod +x "$WORK/b64/base64"
+PATH="$WORK/b64:$PATH" git salvage view -o "$WORK/v8.html" --no-open >/dev/null
+check "view: base64 without a final newline" view_frame "$WORK/v8.html"
 
 # Detached HEAD.
 git checkout -q --detach HEAD~1
@@ -551,7 +560,7 @@ check "view detached: status says detached" grep -qx "S|# branch.head (detached)
 
 # Bad arguments: refused, nothing written.
 mkdir -p "$WORK/adir"
-for a in "-n 0" "-n 00" "-n x" "-n" "-o" "-o $WORK/adir" "--bogus" "extra"; do
+for a in "-n 0" "-n 00" "-n 1234567890" "-n x" "-n" "-o" "-o $WORK/adir" "--bogus" "extra"; do
 	# shellcheck disable=SC2086 # split on purpose
 	check "view refuses '$a'" sh -c '! git salvage view --no-open $1 >/dev/null 2>&1 && test ! -e .git/salvage-view.html' _ "$a"
 done
@@ -596,6 +605,9 @@ check "uninstall: files gone" test ! -e "$WORK/shim2/git" -a ! -e "$WORK/shim2/g
 mkdir -p "$WORK/shim3" && printf 'x\n' >"$WORK/shim3/git-salvage-view.html"
 check "uninstall: a lone view template is removed" \
 	sh -c 'git salvage uninstall --dir "$1" >/dev/null && test ! -e "$1/git-salvage-view.html"' _ "$WORK/shim3"
+mkdir -p "$WORK/shim3" && printf 'x\n' >"$WORK/shim3/git-salvage-view.html"
+check "uninstall: names only what it removed" \
+	test "$(git salvage uninstall --dir "$WORK/shim3" | head -n 1)" = "removed $WORK/shim3/git-salvage-view.html"
 
 # ---------------------------------------------------------- shim: transparency
 

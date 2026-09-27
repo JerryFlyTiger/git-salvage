@@ -722,13 +722,17 @@ cmd_uninstall() {
 		echo "nothing installed in $DIR"
 		return 0
 	fi
+	local f removed=''
 	if [ -e "$DIR/git" ]; then
 		is_shim "$DIR/git" || die "$DIR/git is not the git-salvage shim; not removing it"
-		rm -f "$DIR/git" || die "cannot remove $DIR/git"
 	fi
-	rm -f "$DIR/git-salvage" "$DIR/$VIEW_TEMPLATE" || die "cannot remove $DIR/git-salvage"
+	for f in git git-salvage "$VIEW_TEMPLATE"; do
+		[ -e "$DIR/$f" ] || continue
+		rm -f "$DIR/$f" || die "cannot remove $DIR/$f"
+		removed="$removed $DIR/$f"
+	done
 	rmdir "$DIR" 2>/dev/null
-	echo "removed $DIR/git, $DIR/git-salvage and $DIR/$VIEW_TEMPLATE"
+	echo "removed$removed"
 	echo "remove $DIR from PATH in your shell profile; snapshots stay under refs/salvage/"
 }
 
@@ -860,8 +864,11 @@ cmd_view() {
 		esac
 		shift
 	done
-	case $max in '' | *[!0-9]*) die "not a commit count: '$max'" ;; esac
-	[ "$((10#$max))" -gt 0 ] || die "not a commit count: '$max'"
+	# At most 9 digits: bash arithmetic cannot wrap. git gets the plain
+	# decimal number, never a leading zero.
+	case $max in '' | *[!0-9]* | ??????????*) die "not a commit count: '$max'" ;; esac
+	max=$((10#$max))
+	[ "$max" -gt 0 ] || die "not a commit count: '$max'"
 	[ -n "$out" ] || out=$GITDIR/salvage-view.html
 	[ ! -d "$out" ] || die "$out is a directory"
 	here=$(cd -P -- "${0%/*}" 2>/dev/null && pwd -P) || die "cannot locate $0"

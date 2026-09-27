@@ -260,8 +260,9 @@ function eventRef(moves) {
 	for (var i = 0; i < moves.length; i++) if (/^refs\/heads\//.test(moves[i].ref)) return moves[i].ref;
 	return moves.length ? moves[0].ref : "";
 }
-// Whether the event moved a local branch; false for a HEAD-only entry
-// (detached HEAD).
+// Whether the event moved a local branch. false does not mean HEAD was
+// detached: a deleted branch's reflog is deleted with it (Q4), a branch may
+// have no reflog, and the -n cap may cut off the branch's entry.
 function movesBranch(moves) {
 	return moves.some(function (m) { return /^refs\/heads\//.test(m.ref); });
 }
@@ -269,7 +270,8 @@ function movesBranch(moves) {
 // A reflog message -> { action, phase, detail, text }. text is null when the
 // message is not one we measured (dev/measure-reflog.sh): never a guess.
 // ref: the ref whose log it is; branches: { <local branch name>: true };
-// onBranch: false when only a detached HEAD moved (default true).
+// onBranch: false when no branch entry came with it (default true); the
+// text then says only what HEAD did.
 function explain(msg, ref, branches, onBranch) {
 	var colon = msg.indexOf(": ");
 	var head = colon < 0 ? msg : msg.slice(0, colon);
@@ -291,8 +293,7 @@ function explain(msg, ref, branches, onBranch) {
 	}
 	switch (action) {
 	case "commit":
-		if (phase === "") r.text = "Made a new commit " + q(detail) + "." + (br ? " The branch moved forward by one commit." :
-			" HEAD is detached, so no branch moved: the commit is on no branch until you create one.");
+		if (phase === "") r.text = "Made a new commit " + q(detail) + "." + (br ? " The branch moved forward by one commit." : "");
 		else if (phase === "initial") r.text = "Made the very first commit, " + q(detail) + ".";
 		else if (phase === "amend") r.text = "Replaced the last commit with a corrected copy (" + q(detail) + ") that has a new id.";
 		else if (phase === "merge") r.text = "Finished a merge (after resolving conflicts) with a merge commit: a commit with two parents.";
@@ -311,7 +312,7 @@ function explain(msg, ref, branches, onBranch) {
 	case "reset":
 		m = /^moving to (.+)$/.exec(detail);
 		if (m && m[1] === "HEAD") r.text = "HEAD stayed where it was; only the index and/or files were reset. This is also how git stash clears your changes.";
-		else if (m) r.text = (br ? "Moved the current branch (and HEAD) to " : "Moved the detached HEAD to ") +
+		else if (m) r.text = (br ? "Moved the current branch (and HEAD) to " : "Moved HEAD to ") +
 			(HEX40.test(m[1]) ? short(m[1]) : m[1]) + ". With --hard, uncommitted changes were overwritten too.";
 		break;
 	case "merge":
@@ -331,7 +332,7 @@ function explain(msg, ref, branches, onBranch) {
 		}
 		break;
 	case "cherry-pick":
-		if (phase === "") r.text = "Copied the commit " + q(detail) + " onto " + (br ? "the current branch" : "the detached HEAD") + ", as a new commit.";
+		if (phase === "") r.text = "Copied the commit " + q(detail) + " onto " + (br ? "the current branch" : "HEAD") + ", as a new commit.";
 		break;
 	case "revert":
 		if (phase === "") r.text = "Made a new commit that undoes an earlier one (" + detail + "). History is kept; nothing is removed.";
@@ -568,8 +569,10 @@ function whereSentence(st, head) {
 		Array.prototype.forEach.call(document.querySelectorAll(".sel, .sel-new, .sel-old"), function (n) {
 			n.classList.remove("sel", "sel-new", "sel-old");
 		});
+		if (selected) selected.removeAttribute("aria-current");
 		if (selected === li) { selected = null; return; }
 		selected = li;
+		li.setAttribute("aria-current", "true");
 		li.classList.add("sel");
 		var first = null;
 		ev.moves.forEach(function (m) {
@@ -609,7 +612,6 @@ function whereSentence(st, head) {
 			});
 		}
 		li.tabIndex = 0;
-		li.setAttribute("role", "button");
 		li.addEventListener("click", function () { select(li, ev); });
 		li.addEventListener("keydown", function (e) {
 			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(li, ev); }

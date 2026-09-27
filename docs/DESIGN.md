@@ -282,12 +282,13 @@ the whole, and substitutes it for the line `@@SALVAGE_DATA@@` of the template
 `bin/git-salvage-view.html` (installed next to `git-salvage`). base64 means no
 subject, path or ref name can break out of the page, whatever it contains.
 Fields never contain NUL or newline: git formats `%s` and reflog messages as
-one line, and status quotes unusual paths.
+one line, status quotes unusual paths, and a newline in the repo's directory
+name is replaced by a space.
 
 | tag | fields | source |
 |---|---|---|
 | `V` | format version (`1`) | |
-| `M` | repo directory name, generated unix time, `git --version` | |
+| `M` | repo directory name (a newline in it becomes a space), generated unix time, `git --version` | |
 | `H` | symbolic HEAD ref (empty if detached), HEAD commit (empty if unborn) | `symbolic-ref -q`, `rev-parse` |
 | `S` | one line of status | `--no-optional-locks status --porcelain=v2 --branch --show-stash` |
 | `R` | refname, object, peeled commit (annotated tags), upstream, track | `for-each-ref refs/heads refs/remotes refs/tags` |
@@ -302,7 +303,8 @@ either way), so a kind would read `worktree,refs/heads/main`.
 `P` records carry no number: they come newest first, and the page numbers
 them by that order (1 = newest), the same numbers as `git salvage list`.
 
-`-n` defaults to 300 commits. The reflog ids are included so that commits a
+`-n` defaults to 300 commits; it takes 1 to 9 digits and git gets the plain
+decimal number (`-n 02` is 2). The reflog ids are included so that commits a
 `reset` or `rebase` left behind are drawn (greyed) next to the ones that
 replaced them.
 
@@ -319,7 +321,12 @@ replaced them.
 4. **The timeline**, newest first: reflog entries and snapshots merged by
    time. A branch entry with the same time, new id and message as a `HEAD`
    entry is the same event (a commit moves both) and is shown once, naming
-   the branch. Each event gives the command, a plain-words explanation, and
+   the branch; two equal `HEAD` entries stay two events, each taking at most
+   one entry per branch. The event is explained for its local branch if it
+   moved one (a clone also moves the remote ref). A `HEAD` entry with no
+   branch entry is not called "detached": a deleted branch's reflog is gone
+   (Q4), a branch may have no reflog, and `-n` may cut its entry off; the
+   text then says only what HEAD did. Each event gives the command, a plain-words explanation, and
    before -> after ids (before = the same ref's next-older entry). Selecting
    an event highlights both commits in the graph. When "before" is left
    behind, the event says so and gives `git branch <name> <id>` to get it

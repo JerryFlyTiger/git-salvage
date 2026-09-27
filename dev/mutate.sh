@@ -173,7 +173,7 @@ mut "doctor: git's exec-path not skipped" $S 'doctor with the shim' \
 mut "install: view template not copied" $S 'view template beside it' \
 	's/\tcopy_into "\$here\/\$VIEW_TEMPLATE" "\$DIR\/\$VIEW_TEMPLATE"\n\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" \|\| die "[^"]*"\n\tchmod 644 "\$DIR\/\$VIEW_TEMPLATE" \|\| die "[^"]*"\n/\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" || die "x"\n/'
 mut "uninstall: view template kept" $S 'uninstall: files gone' \
-	's/rm -f "\$DIR\/git-salvage" "\$DIR\/\$VIEW_TEMPLATE"/rm -f "\$DIR\/git-salvage"/'
+	's/for f in git git-salvage "\$VIEW_TEMPLATE"; do/for f in git git-salvage; do/'
 
 # --- view (bash side)
 mut "view: status may write the index" $S 'view: repo unchanged' \
@@ -202,20 +202,22 @@ mut "view js: HEAD and branch entries not merged" $V 'one event' \
 mut "view js: unknown phase explained" $V 'unknown messages' \
 	's/else if \(phase === "merge"\) r\.text/else r.text/'
 
-mut "view js: detached HEAD treated as a branch" $V 'detached HEAD, nothing said' \
+mut "view js: HEAD-only entry treated as a branch" $V 'no branch entry, nothing said' \
 	's/var br = onBranch !== false;/var br = true;/'
 mut "view js: event ref = second move" $V 'eventRef' \
 	's/if \(\/\^refs\\\/heads\\\/\/\.test\(moves\[i\]\.ref\)\) return moves\[i\]\.ref;/if (i === 1) return moves[i].ref;/'
 mut "view js: equal HEAD entries collapse" $V 'two equal HEAD entries' \
 	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === e\.ref; \}\)\) same = h;/same = h;/'
 mut "view: -n 00 accepted" $S "view refuses '-n 00'" \
-	's/\t\[ "\$\(\(10#\$max\)\)" -gt 0 \] \|\| die "[^"]*"\n//'
+	's/\t\[ "\$max" -gt 0 \] \|\| die "[^"]*"\n//'
+mut "view: 10-digit -n accepted" $S "view refuses '-n 1234567890'" \
+	's/ \| \?\?\?\?\?\?\?\?\?\?\*\) die "not a commit count/) die "not a commit count/'
 mut "view: -o <dir> accepted" $S 'adir' \
 	's/\t\[ ! -d "\$out" \] \|\| die "[^"]*"\n//'
 mut "view: newline kept in the repo name" $S 'newline in the repo name keeps' \
 	's/ \| tr .\\n. . .\)/)/'
-# Not listed: dropping the "data ends with a newline" guard in cmd_view.
-# GNU base64 always ends with one, so there it is an equivalent mutation.
+mut "view: data may end without a newline" $S 'base64 without a final newline' \
+	's/if \[ -n "\$\(tail -c 1 "\$raw"\)" \]; then/if false; then/'
 
 wait
 echo "== mutations ($I)"
