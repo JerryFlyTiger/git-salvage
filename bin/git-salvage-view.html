@@ -262,7 +262,7 @@ function eventRef(moves) {
 }
 // Whether the event moved a local branch. false does not mean HEAD was
 // detached: a deleted branch's reflog is deleted with it (Q4), a branch may
-// have no reflog, and the -n cap may cut off the branch's entry.
+// have no reflog, and the 300-entry reflog cap may cut off the branch's entry.
 function movesBranch(moves) {
 	return moves.some(function (m) { return /^refs\/heads\//.test(m.ref); });
 }
@@ -324,10 +324,10 @@ function explain(msg, ref, branches, onBranch) {
 	case "pull":
 		if (phase === "start") r.text = (action === "pull" ? "pull --rebase started" : "Rebase started") + ": HEAD jumped to the new base. Your commits will be copied onto it one at a time.";
 		else if (phase === "pick") r.text = "Copied the commit " + q(detail) + " onto the new base. The copy is a new commit with a new id.";
-		else if (phase === "finish") r.text = "Rebase finished: the branch now points at the copies, not at the original commits.";
+		else if (phase === "finish") r.text = "Rebase finished: " + (br ? "the branch" : "HEAD") + " now points at the copies, not at the original commits.";
 		else if (phase === "abort") r.text = "Rebase cancelled: back where it started.";
 		else if (phase === "" && action === "pull") {
-			if (detail === "Fast-forward") r.text = "Pulled: the branch moved forward to the remote's commits (fast-forward).";
+			if (detail === "Fast-forward") r.text = "Pulled: " + (br ? "the branch" : "HEAD") + " moved forward to the remote's commits (fast-forward).";
 			else if (/^Merge made by /.test(detail)) r.text = "Pulled and merged the remote's commits with a new merge commit.";
 		}
 		break;

@@ -208,8 +208,10 @@ mut "view js: event ref = second move" $V 'eventRef' \
 	's/if \(\/\^refs\\\/heads\\\/\/\.test\(moves\[i\]\.ref\)\) return moves\[i\]\.ref;/if (i === 1) return moves[i].ref;/'
 mut "view js: equal HEAD entries collapse" $V 'two equal HEAD entries' \
 	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === e\.ref; \}\)\) same = h;/same = h;/'
+# Not listed: dropping max=$((10#$max)). git reads -n 010 as 10 too
+# (measured, git 2.43.0), so it is an equivalent mutation.
 mut "view: -n 00 accepted" $S "view refuses '-n 00'" \
-	's/\t\[ "\$max" -gt 0 \] \|\| die "[^"]*"\n//'
+	's/\t\[ "\$\(\(10#\$max\)\)" -gt 0 \] \|\| die "[^"]*"\n//'
 mut "view: 10-digit -n accepted" $S "view refuses '-n 1234567890'" \
 	's/ \| \?\?\?\?\?\?\?\?\?\?\*\) die "not a commit count/) die "not a commit count/'
 mut "view: -o <dir> accepted" $S 'adir' \

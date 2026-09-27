@@ -303,8 +303,10 @@ either way), so a kind would read `worktree,refs/heads/main`.
 `P` records carry no number: they come newest first, and the page numbers
 them by that order (1 = newest), the same numbers as `git salvage list`.
 
-`-n` defaults to 300 commits; it takes 1 to 9 digits and git gets the plain
-decimal number (`-n 02` is 2). The reflog ids are included so that commits a
+`-n` defaults to 300 commits and caps only the `C` records (the reflogs have
+their own fixed cap of 300 entries). It takes 1 to 9 digits, so bash
+arithmetic cannot wrap; git reads a leading zero as decimal anyway (`-n 010`
+is 10, measured on git 2.43.0). The reflog ids are included so that commits a
 `reset` or `rebase` left behind are drawn (greyed) next to the ones that
 replaced them.
 
@@ -325,7 +327,8 @@ replaced them.
    one entry per branch. The event is explained for its local branch if it
    moved one (a clone also moves the remote ref). A `HEAD` entry with no
    branch entry is not called "detached": a deleted branch's reflog is gone
-   (Q4), a branch may have no reflog, and `-n` may cut its entry off; the
+   (Q4), a branch may have no reflog, and the 300-entry cap on the reflogs
+   (one cap over all refs, Q2) may cut its entry off; the
    text then says only what HEAD did. Each event gives the command, a plain-words explanation, and
    before -> after ids (before = the same ref's next-older entry). Selecting
    an event highlights both commits in the graph. When "before" is left

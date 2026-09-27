@@ -543,10 +543,10 @@ view_decode "$WORK/v3.html" "$WORK/v3.data"
 check "view -n 2: two newest commits" test "$(grep '^C|' "$WORK/v3.data" | cut -d'|' -f6)" = "$(printf 'c3\nc2')"
 git salvage view -o "$WORK/v3.html" -n 02 --no-open >/dev/null
 view_decode "$WORK/v3.html" "$WORK/v3.data"
-check "view -n 02: read as 2" test "$(grep -c '^C|' "$WORK/v3.data")" = 2
+check "view -n 02: two commits" test "$(grep -c '^C|' "$WORK/v3.data")" = 2
 # base64 that does not end its output with a newline (as some may not):
 # the page must still have the data and the template's next line apart.
-mkdir -p "$WORK/b64" && printf '#!/bin/sh\nprintf %%s "$(%s "$@")"\n' "$(command -v base64)" >"$WORK/b64/base64" &&
+mkdir -p "$WORK/b64" && printf '#!/bin/sh\nprintf %%s "$("%s" "$@")"\n' "$(command -v base64)" >"$WORK/b64/base64" &&
 	chmod +x "$WORK/b64/base64"
 PATH="$WORK/b64:$PATH" git salvage view -o "$WORK/v8.html" --no-open >/dev/null
 check "view: base64 without a final newline" view_frame "$WORK/v8.html"

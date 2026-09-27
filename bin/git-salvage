@@ -864,11 +864,10 @@ cmd_view() {
 		esac
 		shift
 	done
-	# At most 9 digits: bash arithmetic cannot wrap. git gets the plain
-	# decimal number, never a leading zero.
+	# At most 9 digits: bash arithmetic cannot wrap.
 	case $max in '' | *[!0-9]* | ??????????*) die "not a commit count: '$max'" ;; esac
-	max=$((10#$max))
-	[ "$max" -gt 0 ] || die "not a commit count: '$max'"
+	[ "$((10#$max))" -gt 0 ] || die "not a commit count: '$max'"
+	max=$((10#$max)) # git reads 010 as 10 too (measured): just tidier
 	[ -n "$out" ] || out=$GITDIR/salvage-view.html
 	[ ! -d "$out" ] || die "$out is a directory"
 	here=$(cd -P -- "${0%/*}" 2>/dev/null && pwd -P) || die "cannot locate $0"

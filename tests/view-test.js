@@ -207,7 +207,9 @@ test("explain: no branch entry, nothing said about a branch or detaching", funct
 	// A HEAD-only entry may be a detached HEAD, or a branch whose reflog is
 	// gone (deleted branch, Q4): the text must fit both.
 	var cases = [["commit: x", "Made a new commit \u201cx\u201d."], ["reset: moving to HEAD~1", "Moved HEAD to HEAD~1"],
-		["merge main: Fast-forward", "HEAD just moved ahead"], ["cherry-pick: s1", "onto HEAD,"]];
+		["merge main: Fast-forward", "HEAD just moved ahead"], ["cherry-pick: s1", "onto HEAD,"],
+		["pull -q --ff-only: Fast-forward", "Pulled: HEAD moved forward"],
+		["rebase (finish): returning to refs/heads/topic", "Rebase finished: HEAD now points"]];
 	return cases.every(function (c) {
 		var t = explain(c[0], "HEAD", BR, false).text;
 		if (t.indexOf(c[1]) >= 0 && !/branch|detached/.test(t.replace(/Merged main/, ""))) return true;

@@ -93,6 +93,8 @@ git log -g --format=%gD refs/heads/nosuch HEAD >/dev/null 2>&1
 echo "exit $?"
 echo "== Q2 -n 3 over several reflogs: total lines (3 = total, not per ref)"
 git log -g -n 3 --format=%gD HEAD refs/heads/main refs/heads/feature | wc -l | tr -d ' '
+echo "== Q2 log -n 010 and -n 08: decimal? (prints the counts)"
+echo "$(git log -n 010 --format=%H | wc -l | tr -d ' ') $(git log -n 08 --format=%H | wc -l | tr -d ' ')"
 echo "== Q2 exit code of log -g HEAD on an unborn branch"
 (git init -q "$HOME/unborn" && cd "$HOME/unborn" && git log -g --format=%gD HEAD >/dev/null 2>&1; echo "exit $?")
 echo "== Q2 git reflog show --date=unix --format='%H %gD %gs' main -n 2"
