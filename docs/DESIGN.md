@@ -10,6 +10,12 @@ git already protects *commits* (the reflog). It does not protect anything that
 was never committed: `git reset --hard`, `git restore`, `git checkout -- f`,
 `git clean -f` destroy it with no way back. That gap is the whole product.
 
+Second, smaller job: `git salvage view` draws the repository as a local web
+page -- branches, where you are, the three areas (HEAD, index, working tree),
+and a timeline of what recent commands did, each explained in plain words.
+It is read-only and exists so people can see what git just did to them (and
+which snapshot undoes it). See "The view page".
+
 **Ceiling, stated up front:** this is a small safety net that sits next to the
 real `git`. It is not a git replacement and does not change what any git
 command does. It only catches `git` invocations that go through the `git`
@@ -211,13 +217,115 @@ Snapshots are numbered 1 = newest, in `list` order.
 - Automatic retention: after each new snapshot, keep the newest
   `salvage.keep` (default 200) and delete older refs.
 - `git salvage install [--dir D]` -- copy the shim to
-  `~/.local/share/git-salvage/bin/git` (or D), and `git-salvage` beside it,
-  and print the one `PATH` line to add to the shell profile. One PATH entry
+  `~/.local/share/git-salvage/bin/git` (or D), and `git-salvage` and
+  `git-salvage-view.html` beside it, and print the one `PATH` line to add to the shell profile. One PATH entry
   then reaches both: real git finds `git-salvage` through PATH for
   `git salvage`. Install refuses to overwrite a `git` in D that is not the
-  shim. `git salvage uninstall` removes it. `git salvage
+  shim. `git salvage uninstall` removes the three files. `git salvage
   doctor` reports: which `git` is first on PATH, whether it is the shim, and
   the real git it resolves to.
+
+## The view page (`git salvage view`)
+
+```
+git salvage view [-o <file>] [-n <max-commits>] [--no-open]
+```
+
+Writes one self-contained HTML file (default `$GIT_DIR/salvage-view.html`,
+so it is never tracked), prints `wrote <path>`, and opens it: `open` on
+macOS, else `xdg-open` if present, else it only prints. `--no-open` never
+opens. No server, no network: the page loads nothing from outside.
+
+**Read-only.** It changes no ref, no file in the working tree, and not the
+index: status runs as `git --no-optional-locks status`, which does not write
+back the refreshed index. Needs a work tree (same rule as the other commands).
+
+### Why the reflog, not the shim
+
+The timeline comes from git's own reflogs plus `refs/salvage/`, not from the
+shim. The shim `exec`s real git, so it no longer exists when the command ends
+and cannot see the after-state without giving up `exec` (and with it the
+transparency rule). The reflog already has, for every ref move, the new id,
+the time and a message naming the command -- also for commits made by tools
+that bypass the shim. The commands that move no ref (`restore`, `clean`,
+`checkout -- f`, `stash drop`) are exactly the ones that leave a snapshot,
+and a snapshot's subject is the command. Measured (`dev/measure-reflog.sh`,
+git 2.55.0):
+
+- Reflog messages are not localized: the same history under `zh_TW.UTF-8` and
+  `C` gives identical messages (Q1).
+- One `git log -g <ref>...` walks several reflogs merged newest first; `%gD`
+  with `--date=unix` prints `<full refname>@{<unix time>}`; `-n` caps the
+  total (Q2). A ref that does not exist is fatal (exit 128), and so is `HEAD`
+  on an unborn branch; a ref with no reflog is silently skipped.
+- A deleted branch's own reflog is deleted with it; `HEAD`'s keeps the
+  entries (Q4).
+- `pull` writes its whole argv into the message (`pull -q --rebase origin
+  main (start): ...`), and a rebase writes `(start)`, `(pick)`, `(finish)`.
+
+### Data handed to the page
+
+bash collects everything with a fixed set of git calls (no per-commit or
+per-ref process), writes it as lines of NUL-separated fields, base64-encodes
+the whole, and substitutes it for the line `@@SALVAGE_DATA@@` of the template
+`bin/git-salvage-view.html` (installed next to `git-salvage`). base64 means no
+subject, path or ref name can break out of the page, whatever it contains.
+Fields never contain NUL or newline: git formats `%s` and reflog messages as
+one line, and status quotes unusual paths.
+
+| tag | fields | source |
+|---|---|---|
+| `V` | format version (`1`) | |
+| `M` | repo directory name, generated unix time, `git --version` | |
+| `H` | symbolic HEAD ref (empty if detached), HEAD commit (empty if unborn) | `symbolic-ref -q`, `rev-parse` |
+| `S` | one line of status | `--no-optional-locks status --porcelain=v2 --branch --show-stash` |
+| `R` | refname, object, peeled commit (annotated tags), upstream, track | `for-each-ref refs/heads refs/remotes refs/tags` |
+| `C` | commit, parents (space-separated), committer unix time, author name, subject | `log --date-order -n <max>` from HEAD, all branches, remotes, tags and the reflog ids below that still exist (`cat-file --batch-check`) |
+| `L` | `%gD`, new commit, message | `log -g -n 300 --date=unix` over HEAD (if born), `refs/heads/*`, `refs/remotes/*` |
+| `P` | number, refname, commit, unix time, kind, subject, first parent, `Salvage-Ref` or `Salvage-Head` | one `for-each-ref refs/salvage/` |
+
+`-n` defaults to 300 commits. The reflog ids are included so that commits a
+`reset` or `rebase` left behind are drawn (greyed) next to the ones that
+replaced them.
+
+### What the page shows
+
+1. **Where you are**, one sentence: the branch (or "detached at <id>"),
+   ahead/behind its upstream, and what is uncommitted.
+2. **The three areas**: HEAD commit -> index (staged) -> working tree
+   (modified, untracked, conflicted), with counts, and which command moves
+   changes between them (`add`, `commit`, `restore`, `restore --staged`).
+3. **The graph**: commits in date order with lanes, labels for local
+   branches, remote branches, tags and HEAD. A commit reachable from no ref
+   and no HEAD (only from the reflog) is drawn greyed, "left behind".
+4. **The timeline**, newest first: reflog entries and snapshots merged by
+   time. A branch entry with the same time, new id and message as a `HEAD`
+   entry is the same event (a commit moves both) and is shown once, naming
+   the branch. Each event gives the command, a plain-words explanation, and
+   before -> after ids (before = the same ref's next-older entry). Selecting
+   an event highlights both commits in the graph. When "before" is left
+   behind, the event says so and gives `git branch <name> <id>` to get it
+   back. A snapshot event gives `git salvage restore <n>`.
+
+Explanations are chosen by the message's action, the text before the first
+`: ` with a trailing ` (start|pick|finish|...)` and `pull`'s argv peeled off:
+`commit`, `commit (initial|amend|merge)`, `checkout` (`moving from A to B`),
+`reset` (`moving to X`), `merge <x>` (`Fast-forward` or a merge commit),
+`rebase`/`pull --rebase` (start, pick, finish, abort), `pull`,
+`cherry-pick`, `revert`, `branch` (`Created from`, `Reset to`, renamed),
+`fetch`/`update by push` (remote refs), `clone`. Anything else is shown
+with its raw message and no explanation -- never a guessed one.
+
+### Testing the page
+
+bash side, in `tests/run.sh`: decode the embedded data and check its records
+against the real git; the repo is unchanged (refs, index bytes, work tree);
+a subject containing `</script>`, quotes and non-ASCII survives; unborn HEAD,
+detached HEAD and no reflog work. Page logic (parsing, lanes, explanations,
+event merging) is plain functions between `BEGIN LOGIC` / `END LOGIC` in the
+template, run by `tests/view-test.js` under `node`, or `osascript -l
+JavaScript` on macOS (no node there by default). The logic avoids browser-only
+APIs; only the decoding and drawing code outside the markers uses them.
 
 ## Coverage limits (documented, not bugs)
 

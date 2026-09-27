@@ -31,6 +31,7 @@ usage: git salvage list
        git salvage snapshot [-m <message>]
        git salvage drop <n>
        git salvage prune [--keep <k>] [--older-than <days>]
+       git salvage view [-o <file>] [-n <max-commits>] [--no-open]
        git salvage install [--dir <dir>] | uninstall [--dir <dir>] | doctor
 
 Snapshots are numbered 1 = newest, in `git salvage list` order.
@@ -698,6 +699,7 @@ cmd_install() {
 	else
 		die "cannot find shim/git next to $self"
 	fi
+	[ -f "$here/$VIEW_TEMPLATE" ] || die "cannot find $VIEW_TEMPLATE next to $self"
 	if [ -e "$DIR/git" ] && ! is_shim "$DIR/git"; then
 		die "$DIR/git exists and is not the git-salvage shim; not overwriting it"
 	fi
@@ -705,7 +707,9 @@ cmd_install() {
 	# The shim and git-salvage side by side: one PATH entry reaches both.
 	copy_into "$shim" "$DIR/git"
 	copy_into "$self" "$DIR/git-salvage"
+	copy_into "$here/$VIEW_TEMPLATE" "$DIR/$VIEW_TEMPLATE"
 	chmod 755 "$DIR/git" "$DIR/git-salvage" || die "cannot chmod files in $DIR"
+	chmod 644 "$DIR/$VIEW_TEMPLATE" || die "cannot chmod files in $DIR"
 	echo "installed $DIR/git and $DIR/git-salvage"
 	echo "add this line to your shell profile (then open a new shell):"
 	# shellcheck disable=SC2016 # the profile expands $PATH, not us
@@ -722,7 +726,7 @@ cmd_uninstall() {
 		is_shim "$DIR/git" || die "$DIR/git is not the git-salvage shim; not removing it"
 		rm -f "$DIR/git" || die "cannot remove $DIR/git"
 	fi
-	rm -f "$DIR/git-salvage" || die "cannot remove $DIR/git-salvage"
+	rm -f "$DIR/git-salvage" "$DIR/$VIEW_TEMPLATE" || die "cannot remove $DIR/git-salvage"
 	rmdir "$DIR" 2>/dev/null
 	echo "removed $DIR/git and $DIR/git-salvage"
 	echo "remove $DIR from PATH in your shell profile; snapshots stay under refs/salvage/"
@@ -786,6 +790,97 @@ cmd_doctor() {
 	return "$problems"
 }
 
+# ------------------------------------------------------------------ view page
+
+VIEW_TEMPLATE=git-salvage-view.html
+VIEW_USAGE="usage: git salvage view [-o <file>] [-n <max-commits>] [--no-open]"
+VIEW_REFLOG_MAX=300
+
+# view_data <max-commits>: the page's data, one record per line, fields
+# NUL-separated (docs/DESIGN.md "Data handed to the page"). Run it with
+# pipefail: a failed git call anywhere must fail the page.
+view_data() {
+	local max=$1 sym head line r refs=() ids=
+	printf 'V\0%s\n' 1
+	printf 'M\0%s\0%s\0%s\n' "${TOP##*/}" "$(date +%s)" "$(git --version)" || return 1
+	sym=$(git symbolic-ref -q HEAD) || sym=
+	head=$(head_commit) || head=
+	printf 'H\0%s\0%s\n' "$sym" "$head"
+	git --no-optional-locks status --porcelain=v2 --branch --show-stash |
+		while IFS= read -r line; do printf 'S\0%s\n' "$line"; done || return 1
+	git for-each-ref \
+		--format='R%00%(refname)%00%(objectname)%00%(*objectname)%00%(upstream)%00%(upstream:track,nobracket)' \
+		refs/heads refs/remotes refs/tags || return 1
+	# log -g dies on a ref that does not exist and on an unborn HEAD, so it
+	# only gets refs for-each-ref just listed (refs/remotes/*/HEAD is symbolic).
+	if [ -n "$head" ]; then refs+=(HEAD); fi
+	for r in $(git for-each-ref --format='%(refname)' refs/heads refs/remotes); do
+		case $r in refs/remotes/*/HEAD) ;; *) refs+=("$r") ;; esac
+	done
+	if [ ${#refs[@]} -gt 0 ]; then
+		git log -g -n "$VIEW_REFLOG_MAX" --no-show-signature --date=unix \
+			--format='L%x00%gD%x00%H%x00%gs' "${refs[@]}" || return 1
+		# The reflog's commits that still exist: drawn too, so what a reset or
+		# rebase left behind shows up next to what replaced it.
+		ids=$(git log -g -n "$VIEW_REFLOG_MAX" --format=%H "${refs[@]}" | sort -u |
+			git cat-file --batch-check | sed -n 's/ commit .*//p') || return 1
+	fi
+	if [ -n "$head" ] || [ -n "$ids" ] ||
+		[ -n "$(git for-each-ref --count=1 refs/heads refs/remotes refs/tags)" ]; then
+		refs=()
+		if [ -n "$head" ]; then refs+=(HEAD); fi
+		{ [ -z "$ids" ] || printf '%s\n' "$ids"; } |
+			git log --stdin --date-order -n "$max" --no-show-signature \
+				--format='C%x00%H%x00%P%x00%ct%x00%an%x00%s' \
+				${refs[@]+"${refs[@]}"} --branches --remotes --tags || return 1
+	fi
+	git for-each-ref --sort=-refname \
+		--format='P%00%(refname)%00%(objectname)%00%(committerdate:unix)%00%(trailers:key=Salvage-Kind,valueonly,separator=%x2C)%00%(subject)%00%(parent)%00%(trailers:key=Salvage-Ref,valueonly,separator=%x2C)%(trailers:key=Salvage-Head,valueonly,separator=%x2C)' \
+		"$REF_PREFIX" || return 1
+}
+
+cmd_view() {
+	need_repo
+	local out='' max=300 open=1 here tpl n raw
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-o | -n)
+			[ $# -ge 2 ] || die "$VIEW_USAGE"
+			if [ "$1" = -o ]; then out=$2; else max=$2; fi
+			shift
+			;;
+		--no-open) open=0 ;;
+		*) die "$VIEW_USAGE" ;;
+		esac
+		shift
+	done
+	case $max in '' | *[!0-9]* | 0) die "not a commit count: '$max'" ;; esac
+	[ -n "$out" ] || out=$GITDIR/salvage-view.html
+	here=$(cd -P -- "${0%/*}" 2>/dev/null && pwd -P) || die "cannot locate $0"
+	tpl=$here/$VIEW_TEMPLATE
+	[ -f "$tpl" ] || die "cannot find $tpl"
+	n=$(grep -n -x '@@SALVAGE_DATA@@' "$tpl" | cut -d: -f1)
+	case $n in '' | *[!0-9]*) die "$tpl: needs exactly one @@SALVAGE_DATA@@ line" ;; esac
+	mktmp || die "cannot create a temporary file in $GITDIR"
+	raw=$TMP_LAST
+	(set -o pipefail && view_data "$max" | base64 >"$raw") ||
+		die "could not read the repository for the page"
+	TMPFILES+=("$out.tmp.$$")
+	# head/tail, not sed ranges: `sed -n 1,0p` prints line 1.
+	if ! { head -n "$((n - 1))" "$tpl" && cat "$raw" && tail -n "+$((n + 1))" "$tpl"; } >"$out.tmp.$$" ||
+		! mv -f "$out.tmp.$$" "$out"; then
+		die "cannot write $out"
+	fi
+	echo "wrote $out"
+	[ "$open" = 1 ] || return 0
+	if [ "$(uname -s)" = Darwin ]; then
+		open "$out" >/dev/null 2>&1 && return 0
+	elif command -v xdg-open >/dev/null 2>&1; then
+		xdg-open "$out" >/dev/null 2>&1 && return 0
+	fi
+	echo "open it in a web browser"
+}
+
 # ----------------------------------------------------------------------- main
 
 main() {
@@ -803,6 +898,7 @@ main() {
 	install) cmd_install "$@" ;;
 	uninstall) cmd_uninstall "$@" ;;
 	doctor) cmd_doctor "$@" ;;
+	view) cmd_view "$@" ;;
 	-h | --help | help)
 		usage
 		return 0
