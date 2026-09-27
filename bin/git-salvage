@@ -710,7 +710,7 @@ cmd_install() {
 	copy_into "$here/$VIEW_TEMPLATE" "$DIR/$VIEW_TEMPLATE"
 	chmod 755 "$DIR/git" "$DIR/git-salvage" || die "cannot chmod files in $DIR"
 	chmod 644 "$DIR/$VIEW_TEMPLATE" || die "cannot chmod files in $DIR"
-	echo "installed $DIR/git and $DIR/git-salvage"
+	echo "installed $DIR/git, $DIR/git-salvage and $DIR/$VIEW_TEMPLATE"
 	echo "add this line to your shell profile (then open a new shell):"
 	# shellcheck disable=SC2016 # the profile expands $PATH, not us
 	printf '  export PATH="%s:$PATH"\n' "$DIR"
@@ -718,7 +718,7 @@ cmd_install() {
 
 cmd_uninstall() {
 	install_dir_arg "$@"
-	if ! [ -e "$DIR/git" ] && ! [ -e "$DIR/git-salvage" ]; then
+	if ! [ -e "$DIR/git" ] && ! [ -e "$DIR/git-salvage" ] && ! [ -e "$DIR/$VIEW_TEMPLATE" ]; then
 		echo "nothing installed in $DIR"
 		return 0
 	fi
@@ -728,7 +728,7 @@ cmd_uninstall() {
 	fi
 	rm -f "$DIR/git-salvage" "$DIR/$VIEW_TEMPLATE" || die "cannot remove $DIR/git-salvage"
 	rmdir "$DIR" 2>/dev/null
-	echo "removed $DIR/git and $DIR/git-salvage"
+	echo "removed $DIR/git, $DIR/git-salvage and $DIR/$VIEW_TEMPLATE"
 	echo "remove $DIR from PATH in your shell profile; snapshots stay under refs/salvage/"
 }
 
@@ -800,9 +800,12 @@ VIEW_REFLOG_MAX=300
 # NUL-separated (docs/DESIGN.md "Data handed to the page"). Run it with
 # pipefail: a failed git call anywhere must fail the page.
 view_data() {
-	local max=$1 sym head line r refs=() ids=
+	local max=$1 sym head line r refs=() ids='' ver name all
 	printf 'V\0%s\n' 1
-	printf 'M\0%s\0%s\0%s\n' "${TOP##*/}" "$(date +%s)" "$(git --version)" || return 1
+	ver=$(git --version) || return 1
+	# A record is one line: a newline in the directory name becomes a space.
+	name=$(printf '%s' "${TOP##*/}" | tr '\n' ' ')
+	printf 'M\0%s\0%s\0%s\n' "$name" "$(date +%s)" "$ver" || return 1
 	sym=$(git symbolic-ref -q HEAD) || sym=
 	head=$(head_commit) || head=
 	printf 'H\0%s\0%s\n' "$sym" "$head"
@@ -814,7 +817,8 @@ view_data() {
 	# log -g dies on a ref that does not exist and on an unborn HEAD, so it
 	# only gets refs for-each-ref just listed (refs/remotes/*/HEAD is symbolic).
 	if [ -n "$head" ]; then refs+=(HEAD); fi
-	for r in $(git for-each-ref --format='%(refname)' refs/heads refs/remotes); do
+	all=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes) || return 1
+	for r in $all; do
 		case $r in refs/remotes/*/HEAD) ;; *) refs+=("$r") ;; esac
 	done
 	if [ ${#refs[@]} -gt 0 ]; then
@@ -822,7 +826,7 @@ view_data() {
 			--format='L%x00%gD%x00%H%x00%gs' "${refs[@]}" || return 1
 		# The reflog's commits that still exist: drawn too, so what a reset or
 		# rebase left behind shows up next to what replaced it.
-		ids=$(git log -g -n "$VIEW_REFLOG_MAX" --format=%H "${refs[@]}" | sort -u |
+		ids=$(git log -g -n "$VIEW_REFLOG_MAX" --no-show-signature --format=%H "${refs[@]}" | sort -u |
 			git cat-file --batch-check | sed -n 's/ commit .*//p') || return 1
 	fi
 	if [ -n "$head" ] || [ -n "$ids" ] ||
@@ -856,8 +860,10 @@ cmd_view() {
 		esac
 		shift
 	done
-	case $max in '' | *[!0-9]* | 0) die "not a commit count: '$max'" ;; esac
+	case $max in '' | *[!0-9]*) die "not a commit count: '$max'" ;; esac
+	[ "$((10#$max))" -gt 0 ] || die "not a commit count: '$max'"
 	[ -n "$out" ] || out=$GITDIR/salvage-view.html
+	[ ! -d "$out" ] || die "$out is a directory"
 	here=$(cd -P -- "${0%/*}" 2>/dev/null && pwd -P) || die "cannot locate $0"
 	tpl=$here/$VIEW_TEMPLATE
 	[ -f "$tpl" ] || die "cannot find $tpl"
@@ -869,6 +875,8 @@ cmd_view() {
 		die "could not read the repository for the page"
 	TMPFILES+=("$out.tmp.$$")
 	# head/tail, not sed ranges: `sed -n 1,0p` prints line 1.
+	# The data must end with a newline, or the template's next line joins it.
+	if [ -n "$(tail -c 1 "$raw")" ]; then echo >>"$raw" || die "cannot write $raw"; fi
 	if ! { head -n "$((n - 1))" "$tpl" && cat "$raw" && tail -n "+$((n + 1))" "$tpl"; } >"$out.tmp.$$" ||
 		! mv -f "$out.tmp.$$" "$out"; then
 		die "cannot write $out"

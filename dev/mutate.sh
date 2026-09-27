@@ -182,14 +182,12 @@ mut "view: reflog ids not drawn" $S 'left behind by reset' \
 	's/\{ \[ -z "\$ids" \] \|\| printf .%s\\n. "\$ids"; \} \|/{ :; } |/'
 mut "view: -n ignored" $S 'view -n 2' \
 	's/--date-order -n "\$max"/--date-order -n 300/'
-mut "view: -n 0 accepted" $S "view refuses '-n 0'" \
-	's/\x27\x27 \| \*\[!0-9\]\* \| 0\) die "not a commit count/\x27\x27 | *[!0-9]*) die "not a commit count/'
 mut "view: one trailer key only" $S 'view data: snapshot fields' \
 	's/key=Salvage-Kind,key=Salvage-Ref,key=Salvage-Head/key=Salvage-Kind/'
 mut "view: data not base64" $S 'view data' \
 	's/view_data "\$max" \| base64 >"\$raw"/view_data "\$max" >"\$raw"/'
 mut "view: unborn HEAD given to log -g" $S 'view unborn' \
-	's/\tif \[ -n "\$head" \]; then refs\+=\(HEAD\); fi\n\tfor r in/\trefs+=(HEAD)\n\tfor r in/'
+	's/\tif \[ -n "\$head" \]; then refs\+=\(HEAD\); fi\n\tall=/\trefs+=(HEAD)\n\tall=/'
 
 # --- view (page logic, tests/view-test.js)
 V=bin/git-salvage-view.html
@@ -203,6 +201,21 @@ mut "view js: HEAD and branch entries not merged" $V 'one event' \
 	's/if \(same\) \{/if (false) {/'
 mut "view js: unknown phase explained" $V 'unknown messages' \
 	's/else if \(phase === "merge"\) r\.text/else r.text/'
+
+mut "view js: detached HEAD treated as a branch" $V 'detached HEAD, nothing said' \
+	's/var br = onBranch !== false;/var br = true;/'
+mut "view js: event ref = second move" $V 'eventRef' \
+	's/if \(\/\^refs\\\/heads\\\/\/\.test\(moves\[i\]\.ref\)\) return moves\[i\]\.ref;/if (i === 1) return moves[i].ref;/'
+mut "view js: equal HEAD entries collapse" $V 'two equal HEAD entries' \
+	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === e\.ref; \}\)\) same = h;/same = h;/'
+mut "view: -n 00 accepted" $S "view refuses '-n 00'" \
+	's/\t\[ "\$\(\(10#\$max\)\)" -gt 0 \] \|\| die "[^"]*"\n//'
+mut "view: -o <dir> accepted" $S 'adir' \
+	's/\t\[ ! -d "\$out" \] \|\| die "[^"]*"\n//'
+mut "view: newline kept in the repo name" $S 'newline in the repo name keeps' \
+	's/ \| tr .\\n. . .\)/)/'
+# Not listed: dropping the "data ends with a newline" guard in cmd_view.
+# GNU base64 always ends with one, so there it is an equivalent mutation.
 
 wait
 echo "== mutations ($I)"

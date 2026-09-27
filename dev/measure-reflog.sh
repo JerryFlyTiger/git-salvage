@@ -7,6 +7,7 @@
 #   Q3  whether for-each-ref's %(trailers:key=...) reads Salvage-Kind, and
 #       whether two such atoms in one format stay independent
 #   Q4  what a deleted branch leaves in `git reflog` (is its log gone?)
+#   Q6  default expiry of reflog entries whose commit is on no branch
 #   Q5  messages of rename, rebase --abort, a merge concluded by commit, clone,
 #       a fast-forward pull
 # Usage: bash dev/measure-reflog.sh [<locale to compare with C>]
@@ -87,6 +88,13 @@ echo "== Q2 exit code with a ref that has no reflog"
 git update-ref refs/heads/nolog HEAD
 git log -g --format=%gD refs/heads/nolog HEAD >/dev/null 2>&1
 echo "exit $?"
+echo "== Q2 exit code with a ref that does not exist"
+git log -g --format=%gD refs/heads/nosuch HEAD >/dev/null 2>&1
+echo "exit $?"
+echo "== Q2 -n 3 over several reflogs: total lines (3 = total, not per ref)"
+git log -g -n 3 --format=%gD HEAD refs/heads/main refs/heads/feature | wc -l | tr -d ' '
+echo "== Q2 exit code of log -g HEAD on an unborn branch"
+(git init -q "$HOME/unborn" && cd "$HOME/unborn" && git log -g --format=%gD HEAD >/dev/null 2>&1; echo "exit $?")
 echo "== Q2 git reflog show --date=unix --format='%H %gD %gs' main -n 2"
 git reflog show --date=unix --format='%H %gD %gs' main -n 2
 
@@ -118,4 +126,16 @@ echo "== Q5 more messages: rename, rebase --abort, merge resolved by commit, clo
 	git log -g --format='%gD | %gs' HEAD refs/heads/main refs/remotes/origin/main
 ) | sed 's/@{[0-9]*}//'
 (cd "$HOME/q5" && git log -g --format='%gD | %gs' HEAD refs/heads/b2 refs/heads/main | sed 's/@{[0-9]*}//' | sed '1!G;h;$!d')
+for days in 29 31; do
+	echo "== Q6 default reflog expiry: entries dated $days days ago, dry run (prune lines)"
+	(
+		git init -q "$HOME/q6-$days" && cd "$HOME/q6-$days" || exit 1
+		export GIT_COMMITTER_DATE="$(($(date +%s) - days * 86400)) +0000"
+		echo a >f && git add f && git commit -qm kept
+		echo b >f && git commit -qam left && git reset -q --hard HEAD~1
+		unset GIT_COMMITTER_DATE
+		echo c >f && git commit -qam now
+		git reflog expire --dry-run --verbose HEAD 2>&1 | grep -i prune
+	)
+done
 rm -rf "$HOME"

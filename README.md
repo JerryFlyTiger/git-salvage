@@ -53,7 +53,7 @@ Requires bash (macOS's `/bin/bash` 3.2 is enough) and git.
 ```console
 $ git clone https://github.com/JerryFlyTiger/git-salvage
 $ git-salvage/bin/git-salvage install
-installed /Users/you/.local/share/git-salvage/bin/git and /Users/you/.local/share/git-salvage/bin/git-salvage
+installed /Users/you/.local/share/git-salvage/bin/git, /Users/you/.local/share/git-salvage/bin/git-salvage and /Users/you/.local/share/git-salvage/bin/git-salvage-view.html
 add this line to your shell profile (then open a new shell):
   export PATH="/Users/you/.local/share/git-salvage/bin:$PATH"
 ```

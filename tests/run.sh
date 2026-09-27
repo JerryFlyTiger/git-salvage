@@ -519,7 +519,10 @@ check "view data: reflog has the reset" grep -q "^L|HEAD@{[0-9]*}|$(git rev-pars
 check "view data: reflog has the left-behind commit" grep -q "^L|refs/heads/main@{[0-9]*}|$LEFT|commit: left$" "$D"
 check "view data: reflog of every ref, same count as git" \
 	test "$(vlines L "$D")" = "$(git log -g --format=tformat:x HEAD refs/heads/feature refs/heads/main refs/remotes/origin/main | wc -l | tr -d ' ')"
-check "view data: snapshots newest first" test "$(grep '^P|' "$D" | cut -d'|' -f2,5)" = "$(git for-each-ref --sort=-refname --format='%(refname)|%(subject)' refs/salvage/)"
+check "view data: snapshots newest first" test "$(grep '^P|' "$D" | cut -d'|' -f5)" = "$(printf 's2\ns1')"
+# The page numbers P records by order: that must be `git salvage list`'s order.
+check "view data: snapshot order = git salvage list" \
+	test "$(grep '^P|' "$D" | cut -d'|' -f5 | tr '\n' ' ')" = "$(git salvage list | sed 's/^ *[0-9]*  [^ ]* [^ ]*  [^ ]*  //; s/  ([0-9]* paths)$//' | tr '\n' ' ')"
 check "view data: snapshot fields" grep -qx "P|[^|]*|[0-9a-f]*|[0-9]*|s2|$(git rev-parse HEAD)|Salvage-Kind: worktree$(printf '\037')Salvage-Head: refs/heads/main" "$D"
 check "view: default output in .git" sh -c 'git salvage view --no-open >/dev/null && test -s .git/salvage-view.html'
 
@@ -547,7 +550,8 @@ check "view detached: head record" grep -qx "H||$(git rev-parse HEAD)" "$WORK/v4
 check "view detached: status says detached" grep -qx "S|# branch.head (detached)" "$WORK/v4.data"
 
 # Bad arguments: refused, nothing written.
-for a in "-n 0" "-n x" "-n" "-o" "--bogus" "extra"; do
+mkdir -p "$WORK/adir"
+for a in "-n 0" "-n 00" "-n x" "-n" "-o" "-o $WORK/adir" "--bogus" "extra"; do
 	# shellcheck disable=SC2086 # split on purpose
 	check "view refuses '$a'" sh -c '! git salvage view --no-open $1 >/dev/null 2>&1 && test ! -e .git/salvage-view.html' _ "$a"
 done
@@ -561,6 +565,14 @@ view_decode "$WORK/v5.html" "$WORK/v5.data"
 check "view unborn: head record" grep -qx "H|refs/heads/main|" "$WORK/v5.data"
 check "view unborn: no commits, no reflog" test "$(vlines C "$WORK/v5.data") $(vlines L "$WORK/v5.data")" = "0 0"
 check "view unborn: status" grep -qx "S|# branch.oid (initial)" "$WORK/v5.data"
+check "view -o <dir>: nothing written in it" test -z "$(ls "$WORK/adir")"
+# A newline in the repo's directory name must not split the M record.
+NLDIR="$WORK/nl
+dir"
+git init -q "$NLDIR"
+check "view: newline in the repo name" sh -c 'cd "$1" && git salvage view -o "$2" --no-open >/dev/null' _ "$NLDIR" "$WORK/v7.html"
+view_decode "$WORK/v7.html" "$WORK/v7.data"
+check "view: newline in the repo name keeps one M record" grep -qx "M|nl dir|[0-9]*|$(git --version)" "$WORK/v7.data"
 check "view outside a repo fails" sh -c 'cd "$1" && ! git salvage view --no-open >/dev/null 2>&1' _ "$WORK"
 cd "$R" || exit 1
 
@@ -581,6 +593,9 @@ check "foreign git untouched" test "$(cat "$WORK/foreign/git")" = "not ours"
 check "view from an installed copy" sh -c '"$1/git-salvage" view -o "$2" --no-open >/dev/null && test -s "$2"' _ "$WORK/shim2" "$WORK/v6.html"
 check "uninstall: exits 0" sh -c 'git salvage uninstall --dir "$1" >/dev/null' _ "$WORK/shim2"
 check "uninstall: files gone" test ! -e "$WORK/shim2/git" -a ! -e "$WORK/shim2/git-salvage" -a ! -e "$WORK/shim2/git-salvage-view.html"
+mkdir -p "$WORK/shim3" && printf 'x\n' >"$WORK/shim3/git-salvage-view.html"
+check "uninstall: a lone view template is removed" \
+	sh -c 'git salvage uninstall --dir "$1" >/dev/null && test ! -e "$1/git-salvage-view.html"' _ "$WORK/shim3"
 
 # ---------------------------------------------------------- shim: transparency
 
@@ -716,7 +731,9 @@ check "doctor without the shim: says NO" contains "it is the git-salvage shim: N
 TPL="$ROOT/bin/git-salvage-view.html"
 check "view js: one BEGIN/END LOGIC pair" \
 	test "$(grep -c -x '// BEGIN LOGIC' "$TPL") $(grep -c -x '// END LOGIC' "$TPL")" = "1 1"
-{ sed -n '/^\/\/ BEGIN LOGIC$/,/^\/\/ END LOGIC$/p' "$TPL" && cat "$ROOT/tests/view-test.js"; } >"$WORK/view-test.js"
+# Strict, as in the page: the page says "use strict" just above BEGIN LOGIC.
+{ echo '"use strict";' && sed -n '/^\/\/ BEGIN LOGIC$/,/^\/\/ END LOGIC$/p' "$TPL" &&
+	cat "$ROOT/tests/view-test.js"; } >"$WORK/view-test.js"
 if command -v osascript >/dev/null 2>&1; then
 	echo "view js: osascript -l JavaScript"
 	jsout=$(bounded 60 osascript -l JavaScript "$WORK/view-test.js" 2>&1)

@@ -111,7 +111,7 @@ details summary { cursor: pointer; }
 				<li>A <b>commit</b> is a saved version of the whole project. Each one points back at the commit(s) it was made on top of; the lines show that.</li>
 				<li>A <b>branch</b> is only a name pointing at one commit. Committing moves it forward. <code>reset</code> and <code>rebase</code> move it elsewhere.</li>
 				<li><b>HEAD</b> is where you are: usually a branch; if it points straight at a commit, HEAD is <b>detached</b>.</li>
-				<li>Commits no branch points at any more are <b>left behind</b>. git keeps them in the reflog for a while (90 days by default), so they can still be rescued.</li>
+				<li>Commits no branch points at any more are <b>left behind</b>. git keeps them in the reflog for a while (30 days by default, then <code>git gc</code> may delete them), so they can still be rescued.</li>
 				<li>Changes you never committed live only in the index and the working tree. git cannot bring those back; git-salvage snapshots them before commands that would destroy them.</li>
 			</ul>
 		</details>
@@ -214,17 +214,25 @@ function buildEvents(reflog, snapshots) {
 		e.old = Object.prototype.hasOwnProperty.call(nextOld, e.ref) ? nextOld[e.ref] : null;
 		nextOld[e.ref] = e.id;
 	}
+	// headKey: key -> the HEAD events with that key, in reflog order. Two
+	// equal HEAD entries (two `git stash` in one second) stay two events: a
+	// branch entry joins the first one that has no move of that ref yet.
 	var events = [], headKey = {};
+	function key(e) { return e.time + " " + e.id + " " + e.msg; }
 	reflog.forEach(function (e, k) {
 		if (e.ref !== "HEAD") return;
 		var ev = { type: "reflog", time: e.time, msg: e.msg, id: e.id, old: e.old, order: k,
 			moves: [{ ref: "HEAD", old: e.old, id: e.id }] };
-		headKey[e.time + " " + e.id + " " + e.msg] = ev;
+		if (!Object.prototype.hasOwnProperty.call(headKey, key(e))) headKey[key(e)] = [];
+		headKey[key(e)].push(ev);
 		events.push(ev);
 	});
 	reflog.forEach(function (e, k) {
 		if (e.ref === "HEAD") return;
-		var same = headKey[e.time + " " + e.id + " " + e.msg];
+		var same = null;
+		(Object.prototype.hasOwnProperty.call(headKey, key(e)) ? headKey[key(e)] : []).forEach(function (h) {
+			if (!same && !h.moves.some(function (m) { return m.ref === e.ref; })) same = h;
+		});
 		if (same) { same.moves.push({ ref: e.ref, old: e.old, id: e.id }); return; }
 		events.push({ type: "reflog", time: e.time, msg: e.msg, id: e.id, old: e.old, order: k,
 			moves: [{ ref: e.ref, old: e.old, id: e.id }] });
@@ -245,10 +253,24 @@ function buildEvents(reflog, snapshots) {
 
 var HEX40 = /^[0-9a-f]{40}$/;
 
+// The ref an event is about: the local branch it moved if any (a commit
+// moves HEAD and the branch; a clone also moves the remote ref), else its
+// only or first ref.
+function eventRef(moves) {
+	for (var i = 0; i < moves.length; i++) if (/^refs\/heads\//.test(moves[i].ref)) return moves[i].ref;
+	return moves.length ? moves[0].ref : "";
+}
+// Whether the event moved a local branch; false for a HEAD-only entry
+// (detached HEAD).
+function movesBranch(moves) {
+	return moves.some(function (m) { return /^refs\/heads\//.test(m.ref); });
+}
+
 // A reflog message -> { action, phase, detail, text }. text is null when the
 // message is not one we measured (dev/measure-reflog.sh): never a guess.
-// ref: the ref whose log it is; branches: { <local branch name>: true }.
-function explain(msg, ref, branches) {
+// ref: the ref whose log it is; branches: { <local branch name>: true };
+// onBranch: false when only a detached HEAD moved (default true).
+function explain(msg, ref, branches, onBranch) {
 	var colon = msg.indexOf(": ");
 	var head = colon < 0 ? msg : msg.slice(0, colon);
 	var detail = colon < 0 ? "" : msg.slice(colon + 2);
@@ -258,7 +280,8 @@ function explain(msg, ref, branches) {
 	var action = words[0];
 	var r = { action: action, phase: phase, detail: detail, text: null };
 	var onRemote = /^refs\/remotes\//.test(ref || "");
-	function q(s) { return "“" + s + "”"; }
+	var br = onBranch !== false;
+	function q(s) { return "\u201c" + s + "\u201d"; }
 	if (onRemote) {
 		if (msg === "update by push") r.text = "You pushed: your copy of " + refShort(ref) + " now matches what you sent.";
 		else if (action === "fetch" || action === "pull") {
@@ -268,9 +291,10 @@ function explain(msg, ref, branches) {
 	}
 	switch (action) {
 	case "commit":
-		if (phase === "") r.text = "Made a new commit " + q(detail) + ". The branch moved forward by one commit.";
+		if (phase === "") r.text = "Made a new commit " + q(detail) + "." + (br ? " The branch moved forward by one commit." :
+			" HEAD is detached, so no branch moved: the commit is on no branch until you create one.");
 		else if (phase === "initial") r.text = "Made the very first commit, " + q(detail) + ".";
-		else if (phase === "amend") r.text = "Replaced the last commit with a corrected copy (" + q(detail) + "). The commit it replaced is left behind.";
+		else if (phase === "amend") r.text = "Replaced the last commit with a corrected copy (" + q(detail) + ") that has a new id.";
 		else if (phase === "merge") r.text = "Finished a merge (after resolving conflicts) with a merge commit: a commit with two parents.";
 		break;
 	case "checkout":
@@ -287,17 +311,19 @@ function explain(msg, ref, branches) {
 	case "reset":
 		m = /^moving to (.+)$/.exec(detail);
 		if (m && m[1] === "HEAD") r.text = "HEAD stayed where it was; only the index and/or files were reset. This is also how git stash clears your changes.";
-		else if (m) r.text = "Moved the current branch to " + (HEX40.test(m[1]) ? short(m[1]) : m[1]) + ". Commits after that point are no longer on the branch (left behind). With --hard, uncommitted changes were overwritten too.";
+		else if (m) r.text = (br ? "Moved the current branch (and HEAD) to " : "Moved the detached HEAD to ") +
+			(HEX40.test(m[1]) ? short(m[1]) : m[1]) + ". With --hard, uncommitted changes were overwritten too.";
 		break;
 	case "merge":
-		if (detail === "Fast-forward") r.text = "Merged " + words.slice(1).join(" ") + " as a fast-forward: the branch just moved ahead to its commit; no merge commit was needed.";
+		if (detail === "Fast-forward") r.text = "Merged " + words.slice(1).join(" ") + " as a fast-forward: " +
+			(br ? "the branch" : "HEAD") + " just moved ahead to its commit; no merge commit was needed.";
 		else if (/^Merge made by /.test(detail)) r.text = "Merged " + words.slice(1).join(" ") + " with a new merge commit (a commit with two parents).";
 		break;
 	case "rebase":
 	case "pull":
 		if (phase === "start") r.text = (action === "pull" ? "pull --rebase started" : "Rebase started") + ": HEAD jumped to the new base. Your commits will be copied onto it one at a time.";
 		else if (phase === "pick") r.text = "Copied the commit " + q(detail) + " onto the new base. The copy is a new commit with a new id.";
-		else if (phase === "finish") r.text = "Rebase finished: the branch now points at the copies. The original commits are left behind.";
+		else if (phase === "finish") r.text = "Rebase finished: the branch now points at the copies, not at the original commits.";
 		else if (phase === "abort") r.text = "Rebase cancelled: back where it started.";
 		else if (phase === "" && action === "pull") {
 			if (detail === "Fast-forward") r.text = "Pulled: the branch moved forward to the remote's commits (fast-forward).";
@@ -305,10 +331,10 @@ function explain(msg, ref, branches) {
 		}
 		break;
 	case "cherry-pick":
-		r.text = "Copied the commit " + q(detail) + " onto the current branch, as a new commit.";
+		if (phase === "") r.text = "Copied the commit " + q(detail) + " onto " + (br ? "the current branch" : "the detached HEAD") + ", as a new commit.";
 		break;
 	case "revert":
-		r.text = "Made a new commit that undoes an earlier one (" + detail + "). History is kept; nothing is removed.";
+		if (phase === "") r.text = "Made a new commit that undoes an earlier one (" + detail + "). History is kept; nothing is removed.";
 		break;
 	case "branch":
 		if ((m = /^Created from (.+)$/.exec(detail))) r.text = "Created this branch at " + m[1] + ".";
@@ -318,7 +344,7 @@ function explain(msg, ref, branches) {
 		if ((m = /^renamed (.+) to (.+)$/.exec(detail))) r.text = "Renamed the branch " + refShort(m[1]) + " to " + refShort(m[2]) + ".";
 		break;
 	case "clone":
-		r.text = "Cloned the repository " + detail.replace(/^from /, "from ") + ".";
+		if (phase === "" && /^from /.test(detail)) r.text = "Cloned the repository " + detail + ".";
 		break;
 	}
 	return r;
@@ -357,7 +383,8 @@ function layout(commits) {
 		for (j = 0; j < lanes.length; j++) if (lanes[j] === c.id) lanes[j] = null;
 		c.parents.forEach(function (p, k) {
 			var at = lanes.indexOf(p);
-			if (at < 0) { at = k === 0 && lanes[col] === null ? col : free(); lanes[at] = p; }
+			// lanes[col] was freed above, so the first parent can take it.
+			if (at < 0) { at = k === 0 ? col : free(); lanes[at] = p; }
 			fromCommit[at] = true;
 		});
 		for (j = 0; j < lanes.length; j++) {
@@ -369,6 +396,14 @@ function layout(commits) {
 		rows.push({ id: c.id, col: col, top: top, bottom: bottom });
 	});
 	return { rows: rows, width: width };
+}
+
+// What a snapshot event says.
+function snapshotText(s) {
+	if (s.kind === "worktree") return "Your uncommitted work was saved right before this command ran.";
+	if (s.kind === "branch") return "The branch " + refShort(s.about) + " was saved before it was deleted or overwritten.";
+	if (s.kind === "stash") return "The stash entry " + s.about + " was saved before it was removed.";
+	return "Saved by git-salvage.";
 }
 
 // One sentence: where you are and what is uncommitted.
@@ -551,14 +586,10 @@ function whereSentence(st, head) {
 		if (ev.type === "snapshot") {
 			var s = ev.snap;
 			li.appendChild(el("div", "cmd", "git-salvage snapshot " + s.n + ": " + s.subject));
-			li.appendChild(el("div", "", s.kind === "worktree" ?
-				"Your uncommitted work was saved right before this command ran." :
-				s.kind === "branch" ? "The branch " + refShort(s.about) + " was saved before it was deleted or overwritten." :
-				"The stash entry " + s.about + " was saved before it was dropped."));
+			li.appendChild(el("div", "", snapshotText(s)));
 			li.appendChild(el("div", "undo", "")).appendChild(el("code", "", "git salvage restore " + s.n));
 		} else {
-			var mainRef = ev.moves.length > 1 ? ev.moves[1].ref : ev.moves[0].ref;
-			var ex = explain(ev.msg, mainRef, branches);
+			var ex = explain(ev.msg, eventRef(ev.moves), branches, movesBranch(ev.moves));
 			li.appendChild(el("div", "cmd mono", ev.msg));
 			if (ex.text) li.appendChild(el("div", "", ex.text));
 			var mv = el("div", "moves muted mono");
@@ -577,7 +608,12 @@ function whereSentence(st, head) {
 				li.appendChild(n);
 			});
 		}
+		li.tabIndex = 0;
+		li.setAttribute("role", "button");
 		li.addEventListener("click", function () { select(li, ev); });
+		li.addEventListener("keydown", function (e) {
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(li, ev); }
+		});
 		tl.appendChild(li);
 	});
 })();

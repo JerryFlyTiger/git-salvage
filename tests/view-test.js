@@ -36,7 +36,7 @@ var DATA = [
 	rec("S", "# branch.head main"),
 	rec("R", "refs/heads/main", A, "", "refs/remotes/origin/main", "ahead 1"),
 	rec("R", "refs/tags/v1", D, B, "", ""),
-	rec("L", "HEAD@{1790000005}", A, "commit: a </script> \"q\" é中"),
+	rec("L", "HEAD@{1790000005}", A, "commit: a </script> \"q\" \u00e9\u4e2d"),
 	rec("L", "refs/heads/main@{1790000005}", A, "commit: a"),
 	rec("C", A, B + " " + C, "1790000005", "Ann Lee", "merge it"),
 	rec("C", C, "", "1790000001", "Bo", "root"),
@@ -64,7 +64,7 @@ test("parseData: refs with peeled tag and tracking", function () {
 test("parseData: reflog ref and time split from %gD; message kept byte-exact", function () {
 	var r = parseData(DATA).reflog;
 	return eq(r, [
-		{ ref: "HEAD", time: 1790000005, id: A, msg: "commit: a </script> \"q\" é中" },
+		{ ref: "HEAD", time: 1790000005, id: A, msg: "commit: a </script> \"q\" \u00e9\u4e2d" },
 		{ ref: "refs/heads/main", time: 1790000005, id: A, msg: "commit: a" }]);
 });
 test("parseData: commits with 2 and 0 parents", function () {
@@ -169,15 +169,15 @@ var BR = { main: true, feature: true, topic: true, side: true, b2: true };
 // Every message dev/measure-reflog.sh printed, with a word its text must have.
 var MEASURED = [
 	["HEAD", "commit (initial): one", "very first commit"],
-	["HEAD", "commit: two", "new commit “two”"],
+	["HEAD", "commit: two", "new commit \u201ctwo\u201d"],
 	["HEAD", "checkout: moving from main to feature", "to the branch feature"],
 	["HEAD", "merge feature: Merge made by the 'ort' strategy.", "Merged feature with a new merge commit"],
-	["HEAD", "reset: moving to HEAD~1", "Moved the current branch to HEAD~1"],
+	["refs/heads/main", "reset: moving to HEAD~1", "Moved the current branch (and HEAD) to HEAD~1"],
 	["HEAD", "rebase (start): checkout feature", "Rebase started"],
-	["HEAD", "rebase (pick): three", "Copied the commit “three” onto the new base"],
+	["HEAD", "rebase (pick): three", "Copied the commit \u201cthree\u201d onto the new base"],
 	["HEAD", "rebase (finish): returning to refs/heads/topic", "Rebase finished"],
 	["refs/heads/topic", "rebase (finish): refs/heads/topic onto " + A, "Rebase finished"],
-	["HEAD", "cherry-pick: s1", "Copied the commit “s1”"],
+	["HEAD", "cherry-pick: s1", "Copied the commit \u201cs1\u201d"],
 	["HEAD", "revert: Revert \"s1\"", "undoes an earlier one"],
 	["HEAD", "commit (amend): revert amended", "Replaced the last commit"],
 	["HEAD", "checkout: moving from main to HEAD~1", "detached"],
@@ -185,7 +185,7 @@ var MEASURED = [
 	["HEAD", "reset: moving to HEAD", "git stash"],
 	["HEAD", "merge main: Fast-forward", "Merged main as a fast-forward"],
 	["HEAD", "pull -q --rebase origin main (start): checkout " + A, "pull --rebase started"],
-	["HEAD", "pull -q --rebase origin main (pick): local1", "Copied the commit “local1”"],
+	["HEAD", "pull -q --rebase origin main (pick): local1", "Copied the commit \u201clocal1\u201d"],
 	["HEAD", "pull -q --rebase origin main (finish): returning to refs/heads/main", "Rebase finished"],
 	["HEAD", "pull -q --no-rebase --no-edit origin main: Merge made by the 'ort' strategy.", "Pulled and merged"],
 	["HEAD", "pull -q --ff-only: Fast-forward", "(fast-forward)"],
@@ -203,6 +203,21 @@ var MEASURED = [
 MEASURED.forEach(function (m) {
 	test("explain: " + m[1], function () { return says(m[1], m[0], BR, m[2]); });
 });
+test("explain: detached HEAD, nothing said about a branch moving", function () {
+	var cases = [["commit: x", "no branch moved"], ["reset: moving to HEAD~1", "Moved the detached HEAD to HEAD~1"],
+		["merge main: Fast-forward", "HEAD just moved ahead"], ["cherry-pick: s1", "onto the detached HEAD"]];
+	return cases.every(function (c) {
+		var t = explain(c[0], "HEAD", BR, false).text;
+		if (t.indexOf(c[1]) >= 0 && !/branch moved forward|current branch|the branch just/.test(t)) return true;
+		OUT.push("#   " + JSON.stringify(c[0]) + " -> " + JSON.stringify(t));
+		return false;
+	});
+});
+test("explain: reset makes no claim about what was left behind", function () {
+	// A reset can move forward (to origin/main) or nowhere: the page's own
+	// reachability note says what is left behind, not this text.
+	return explain("reset: moving to origin/main", "refs/heads/main", BR, true).text.indexOf("left behind") < 0;
+});
 test("explain: checkout to a name that is not a local branch is not called a branch", function () {
 	var t = explain("checkout: moving from main to v1.0", "HEAD", BR).text;
 	return eq([t.indexOf("branch") < 0, t.indexOf("v1.0") >= 0], [true, true]);
@@ -218,13 +233,46 @@ test("explain: unknown messages give text null", function () {
 	var unknown = [["HEAD", "stash: whatever"], ["HEAD", "commit (weird): x"], ["HEAD", "merge x: Something new"],
 		["HEAD", "no colon here"], ["refs/remotes/origin/main", "fetch origin: forced-update"],
 		["refs/remotes/origin/main", "commit: x"], ["refs/heads/main", "branch: something else"],
-		["HEAD", "rebase (continue): x"], ["HEAD", "pull origin main: Already up to date"]];
+		["HEAD", "rebase (continue): x"], ["HEAD", "pull origin main: Already up to date"],
+		["HEAD", "cherry-pick (x): s1"], ["HEAD", "revert (y): Revert \"s1\""], ["HEAD", "clone (z): from /x"],
+		["HEAD", "clone: somewhere"]];
 	return unknown.every(function (u) {
 		var t = explain(u[1], u[0], BR).text;
 		if (t === null) return true;
 		OUT.push("#   " + JSON.stringify(u[1]) + " -> " + JSON.stringify(t));
 		return false;
 	});
+});
+
+test("eventRef: the local branch of a merged event, even after a remote ref", function () {
+	return eq([eventRef([{ ref: "HEAD" }, { ref: "refs/remotes/origin/main" }, { ref: "refs/heads/main" }]),
+		eventRef([{ ref: "HEAD" }]), eventRef([{ ref: "refs/remotes/origin/main" }]), eventRef([])],
+		["refs/heads/main", "HEAD", "refs/remotes/origin/main", ""]);
+});
+test("explain via eventRef: a clone event keeps its explanation", function () {
+	var moves = [{ ref: "HEAD" }, { ref: "refs/remotes/origin/main" }, { ref: "refs/heads/main" }];
+	return says("clone: from /x", eventRef(moves), BR, "Cloned the repository from /x");
+});
+test("movesBranch: HEAD-only is detached", function () {
+	return eq([movesBranch([{ ref: "HEAD" }]), movesBranch([{ ref: "HEAD" }, { ref: "refs/heads/main" }]),
+		movesBranch([{ ref: "refs/remotes/origin/main" }])], [false, true, false]);
+});
+test("buildEvents: two equal HEAD entries in one second stay two events", function () {
+	var ev = buildEvents([
+		L("HEAD", 7, A, "reset: moving to HEAD"), L("HEAD", 7, A, "reset: moving to HEAD"),
+		L("refs/heads/main", 7, A, "reset: moving to HEAD"), L("refs/heads/main", 7, A, "reset: moving to HEAD")], []);
+	return eq(ev.map(function (e) { return e.moves.map(function (m) { return m.ref; }); }),
+		[["HEAD", "refs/heads/main"], ["HEAD", "refs/heads/main"]]);
+});
+
+// --------------------------------------------------------------- snapshotText
+
+test("snapshotText: each kind, and no guess for an unknown one", function () {
+	return eq([snapshotText({ kind: "worktree" }), snapshotText({ kind: "branch", about: "refs/heads/x" }),
+		snapshotText({ kind: "stash", about: "stash@{0}" }), snapshotText({ kind: "", about: "" })],
+		["Your uncommitted work was saved right before this command ran.",
+			"The branch x was saved before it was deleted or overwritten.",
+			"The stash entry stash@{0} was saved before it was removed.", "Saved by git-salvage."]);
 });
 
 // ------------------------------------------------------------------ reachable
@@ -268,6 +316,24 @@ test("layout: two tips side by side, lane freed after the root", function () {
 		["t1", 0, [], [[0, 0]]],
 		["t2", 1, [[0, 0]], [[0, 0]]],
 		["r", 0, [[0, 0]], []]]]);
+});
+
+test("layout: merge whose first parent already has a lane", function () {
+	var cs = [{ id: "X", parents: ["P"] }, { id: "M", parents: ["P", "Q"] }, { id: "Q", parents: ["P"] },
+		{ id: "P", parents: [] }];
+	return eq([layout(cs).width, rows(cs)], [2, [
+		["X", 0, [], [[0, 0]]],
+		// M gets lane 1; P already has lane 0: lane 0 passes and M joins it,
+		// Q takes M's freed lane.
+		["M", 1, [[0, 0]], [[0, 0], [1, 0], [1, 1]]],
+		["Q", 1, [[0, 0], [1, 1]], [[0, 0], [1, 0]]],
+		["P", 0, [[0, 0]], []]]]);
+});
+test("layout: parent outside the loaded window keeps its lane to the bottom", function () {
+	var cs = [{ id: "c", parents: ["gone"] }, { id: "d", parents: [] }];
+	return eq([layout(cs).width, rows(cs)], [2, [
+		["c", 0, [], [[0, 0]]],
+		["d", 1, [[0, 0]], [[0, 0]]]]]);
 });
 
 // --------------------------------------------------------------- whereSentence

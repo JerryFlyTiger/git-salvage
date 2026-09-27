@@ -250,7 +250,9 @@ the time and a message naming the command -- also for commits made by tools
 that bypass the shim. The commands that move no ref (`restore`, `clean`,
 `checkout -- f`, `stash drop`) are exactly the ones that leave a snapshot,
 and a snapshot's subject is the command. Measured (`dev/measure-reflog.sh`,
-git 2.55.0):
+git 2.55.0 on macOS; items marked 2.43.0 were measured on Linux, where the
+Q1 messages, Q2 and Q4 also match -- the Q1 locale comparison was not run
+there):
 
 - Reflog messages are not localized: the same history under `zh_TW.UTF-8` and
   `C` gives identical messages (Q1).
@@ -268,6 +270,9 @@ git 2.55.0):
   conflict), `clone: from <path>`, `pull -q --ff-only: Fast-forward` (and
   `...: fast-forward` on the remote ref; measured on git 2.43.0). `git stash` writes
   `reset: moving to HEAD` to `HEAD`'s reflog.
+- A reflog entry whose commit is on no branch expires after 30 days by
+  default: dated 29 days ago it is kept, 31 days ago `reflog expire` prunes
+  it (Q6, git 2.43.0). The page says so for left-behind commits.
 
 ### Data handed to the page
 
@@ -292,7 +297,8 @@ one line, and status quotes unusual paths.
 
 The trailers come from a single `%(trailers:key=...,key=...)` atom: with one
 atom per key in the same format, git 2.43 applies the union of all their keys
-to each atom (measured, Q3), so a kind would read `worktree,refs/heads/main`.
+to each atom (measured, Q3; not yet measured on 2.55, and one atom is right
+either way), so a kind would read `worktree,refs/heads/main`.
 `P` records carry no number: they come newest first, and the page numbers
 them by that order (1 = newest), the same numbers as `git salvage list`.
 
