@@ -22,19 +22,58 @@ asking.
   undefined; `console.log` goes to stderr, the script's final expression
   value goes to stdout.
 
-## Done (staged with `git add -A`, NOT reviewed, NOT committed)
+## Status (2026-09-27, end of the cloud session)
 
-- `dev/measure-reflog.sh` oracle (Q1-Q5). Results are in DESIGN.md except Q5.
-- `docs/DESIGN.md`: new section "The view page"; install copies 3 files.
-- `bin/git-salvage`: `view_data`, `cmd_view`, usage line, install/uninstall
-  of the template. shellcheck clean. Smoke-tested by hand in a scratch repo:
-  data decodes; `</script>`, quotes, CJK survive; the commit a `reset` left
-  behind is included.
-- `bin/git-salvage-view.html`: page (where-you-are sentence, three areas,
-  lane graph, timeline with plain-words explanations, left-behind notes,
-  snapshot undo commands). Never opened in a browser yet.
+Steps 1, 2, 3, 5, 6 of the list below are done in the cloud session on
+`v0.2-view`; **step 4 is next, on the Mac**. Not merged to main.
 
-## Remaining, in order
+Commits on `v0.2-view` after main (df0b155):
+
+| commit | what | cold-read |
+|---|---|---|
+| 8c7fa2b | WIP: page, oracle, DESIGN section | round 1 |
+| 10ef3b3 | tests (JS + bash), README, CI, P-trailer fix, shellcheck fix | round 1 |
+| 319ad5e | round-1 fixes | round 2 |
+| 5fd6564 | round-2 fixes | round 3 |
+| b870a95 | round-3 fixes | round 4: no high/medium findings, no code changed after it |
+| (this one) | PLAN.md only | not reviewed (notes, no code) |
+
+**Unreviewed code: none.** Any change made in step 4 is a new batch and
+needs its own reviewer pass (tail diff from the last commit here).
+
+CI on b870a95 (run 10): ubuntu, macos (bash 3.2 + `osascript -l
+JavaScript`, checked by the "view js runtime" step) and shellcheck all
+green. Local (Linux, git 2.43.0, as a non-root user): `tests: 341/341
+passed`, shellcheck clean, `dev/mutate.sh` 66/66 KILLED.
+
+Notes for the Mac:
+- The container runs as root, so the chmod-based fail-closed tests fail
+  there (6 of them); run the suite as a normal user. Not an issue on the Mac.
+- A headless Chromium smoke test (not step 4) loaded a generated page at
+  390 px wide: no JS errors, no horizontal scroll, a subject with
+  `<img onerror>` shown as text, Enter selects a timeline item.
+- Real bug found and fixed: on git 2.43 several `%(trailers:key=...)` atoms
+  in one for-each-ref format get the union of their keys (oracle Q3). Not
+  measured on 2.55: run `bash dev/measure-reflog.sh` on the Mac and note Q3
+  there in DESIGN.md. Q2's `-n 010`, Q5's ff pull and Q6 (30-day expiry)
+  were also measured only on 2.43.0 so far.
+
+Review findings recorded, not fixed (with reason):
+- Layout: a parent outside the loaded window keeps its lane to the bottom
+  of the graph (history continues past the window). Intended; pinned by a
+  test.
+- Many explain() test needles are the page's own wording; behaviour tests
+  (detached / HEAD-only, reset without "left behind", unknown messages)
+  were added instead of rewording them.
+- Timeline `li` has tabindex + Enter/Space + `aria-current` when
+  selected, but no role (role=button broke list semantics). Revisit in
+  step 4 if keyboard/screen-reader use matters.
+- Oracle Q2 `-n 010` header does not say "10 8 = decimal", and needs main
+  to keep >= 10 commits (it has ~13). Output seen: `10 8`.
+- `M` record: a newline in the repo directory name becomes a space; other
+  control characters in the name are kept (fine: base64 carries them).
+
+## Remaining, in order (original list; 1-3, 5, 6 done)
 
 1. DESIGN.md fixes:
    - `P` record has no number field; the page numbers snapshots by order
