@@ -834,8 +834,10 @@ view_data() {
 				--format='C%x00%H%x00%P%x00%ct%x00%an%x00%s' \
 				${refs[@]+"${refs[@]}"} --branches --remotes --tags || return 1
 	fi
+	# One %(trailers) atom only: with several, git 2.43 applies the union of
+	# their keys to each (measured, dev/measure-reflog.sh Q3).
 	git for-each-ref --sort=-refname \
-		--format='P%00%(refname)%00%(objectname)%00%(committerdate:unix)%00%(trailers:key=Salvage-Kind,valueonly,separator=%x2C)%00%(subject)%00%(parent)%00%(trailers:key=Salvage-Ref,valueonly,separator=%x2C)%(trailers:key=Salvage-Head,valueonly,separator=%x2C)' \
+		--format='P%00%(refname)%00%(objectname)%00%(committerdate:unix)%00%(subject)%00%(parent)%00%(trailers:key=Salvage-Kind,key=Salvage-Ref,key=Salvage-Head,separator=%x1F)' \
 		"$REF_PREFIX" || return 1
 }
 

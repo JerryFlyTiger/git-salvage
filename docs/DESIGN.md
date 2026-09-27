@@ -262,6 +262,12 @@ git 2.55.0):
   entries (Q4).
 - `pull` writes its whole argv into the message (`pull -q --rebase origin
   main (start): ...`), and a rebase writes `(start)`, `(pick)`, `(finish)`.
+- More messages (Q5): `Branch: renamed refs/heads/b to refs/heads/b2`
+  (capital `B`), `rebase (abort): returning to refs/heads/b2`,
+  `commit (merge): Merge branch 'b2'` (a merge concluded by `commit` after a
+  conflict), `clone: from <path>`, `pull -q --ff-only: Fast-forward` (and
+  `...: fast-forward` on the remote ref; measured on git 2.43.0). `git stash` writes
+  `reset: moving to HEAD` to `HEAD`'s reflog.
 
 ### Data handed to the page
 
@@ -282,7 +288,13 @@ one line, and status quotes unusual paths.
 | `R` | refname, object, peeled commit (annotated tags), upstream, track | `for-each-ref refs/heads refs/remotes refs/tags` |
 | `C` | commit, parents (space-separated), committer unix time, author name, subject | `log --date-order -n <max>` from HEAD, all branches, remotes, tags and the reflog ids below that still exist (`cat-file --batch-check`) |
 | `L` | `%gD`, new commit, message | `log -g -n 300 --date=unix` over HEAD (if born), `refs/heads/*`, `refs/remotes/*` |
-| `P` | number, refname, commit, unix time, kind, subject, first parent, `Salvage-Ref` or `Salvage-Head` | one `for-each-ref refs/salvage/` |
+| `P` | refname, commit, unix time, subject, parents (space-separated), the `Salvage-Kind`, `Salvage-Ref` and `Salvage-Head` trailers as `Key: value` separated by U+001F | one `for-each-ref --sort=-refname refs/salvage/` |
+
+The trailers come from a single `%(trailers:key=...,key=...)` atom: with one
+atom per key in the same format, git 2.43 applies the union of all their keys
+to each atom (measured, Q3), so a kind would read `worktree,refs/heads/main`.
+`P` records carry no number: they come newest first, and the page numbers
+them by that order (1 = newest), the same numbers as `git salvage list`.
 
 `-n` defaults to 300 commits. The reflog ids are included so that commits a
 `reset` or `rebase` left behind are drawn (greyed) next to the ones that
@@ -309,10 +321,13 @@ replaced them.
 
 Explanations are chosen by the message's action, the text before the first
 `: ` with a trailing ` (start|pick|finish|...)` and `pull`'s argv peeled off:
-`commit`, `commit (initial|amend|merge)`, `checkout` (`moving from A to B`),
+`commit`, `commit (initial|amend|merge)`, `checkout` (`moving from A to B`;
+the message alone cannot tell a branch B from a tag or a commit, so B counts
+as a branch only when it is in the list of local branches from the `R`
+records),
 `reset` (`moving to X`), `merge <x>` (`Fast-forward` or a merge commit),
 `rebase`/`pull --rebase` (start, pick, finish, abort), `pull`,
-`cherry-pick`, `revert`, `branch` (`Created from`, `Reset to`, renamed),
+`cherry-pick`, `revert`, `branch` (`Created from`, `Reset to`), `Branch` (`renamed`),
 `fetch`/`update by push` (remote refs), `clone`. Anything else is shown
 with its raw message and no explanation -- never a guessed one.
 

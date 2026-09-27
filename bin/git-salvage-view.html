@@ -147,8 +147,17 @@ function parseData(text) {
 		}
 		case "C": d.commits.push({ id: f[1], parents: f[2] ? f[2].split(" ") : [], time: +f[3],
 			author: f[4], subject: f[5] }); break;
-		case "P": d.snapshots.push({ ref: f[1], id: f[2], time: +f[3], kind: f[4], subject: f[5],
-			parent: (f[6] || "").split(" ")[0], about: f[7] }); break;
+		case "P": {
+			// f[6]: "Key: value" trailers separated by U+001F.
+			var tr = {};
+			(f[6] || "").split("\u001f").forEach(function (t) {
+				var c = t.indexOf(": ");
+				if (c > 0) tr[t.slice(0, c)] = t.slice(c + 2);
+			});
+			d.snapshots.push({ ref: f[1], id: f[2], time: +f[3], kind: tr["Salvage-Kind"] || "", subject: f[4],
+				parent: (f[5] || "").split(" ")[0], about: tr["Salvage-Ref"] || tr["Salvage-Head"] || "" });
+			break;
+		}
 		}
 	}
 	d.snapshots.forEach(function (s, k) { s.n = k + 1; }); // 1 = newest, as in `git salvage list`

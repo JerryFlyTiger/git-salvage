@@ -443,6 +443,127 @@ git salvage drop 1 >/dev/null
 check "drop" test "$(nrefs)" = 0
 check "prune needs an option" sh -c '! git salvage prune >/dev/null 2>&1'
 
+# ---------------------------------------------------------- view
+
+VIEW_TPL="$ROOT/bin/git-salvage-view.html"
+# view_decode <page> <out>: the embedded data, NUL shown as '|'. The page is
+# the template with its @@SALVAGE_DATA@@ line replaced by the base64 lines.
+view_decode() {
+	local n t o
+	n=$(grep -n -x '@@SALVAGE_DATA@@' "$VIEW_TPL" | cut -d: -f1)
+	t=$(wc -l <"$VIEW_TPL")
+	o=$(wc -l <"$1")
+	sed -n "${n},$((o - t + n))p" "$1" | base64 --decode | tr '\0' '|' >"$2"
+}
+# view_frame <page>: everything but the data is the template, unchanged.
+view_frame() {
+	local n t
+	n=$(grep -n -x '@@SALVAGE_DATA@@' "$VIEW_TPL" | cut -d: -f1)
+	t=$(wc -l <"$VIEW_TPL")
+	[ "$(head -n "$((n - 1))" "$1")" = "$(head -n "$((n - 1))" "$VIEW_TPL")" ] &&
+		[ "$(tail -n "$((t - n))" "$1")" = "$(tail -n "$((t - n))" "$VIEW_TPL")" ]
+}
+# view_state: refs, reflogs, index bytes and work tree of the current repo.
+view_state() {
+	git for-each-ref --format='%(refname) %(objectname)'
+	git log -g --format='%gD %H %gs' HEAD --branches 2>/dev/null
+	cksum <.git/index
+	find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done
+}
+vlines() { grep -c "^$1|" "$2"; }
+# vids <tag> <data>: the second field of every record with that tag, sorted.
+vids() { grep "^$1|" "$2" | cut -d'|' -f2 | LC_ALL=C sort; }
+
+new_repo
+git init -q --bare "$WORK/view-remote.git"
+git remote add origin "$WORK/view-remote.git"
+git push -q -u origin main 2>/dev/null
+git switch -q -c feature && printf 'f\n' >f && git add f && git commit -qm feat
+git tag -a v1 -m v1 && git tag light
+git switch -q main
+printf 'l\n' >l && git add l && git commit -qm left
+LEFT=$(git rev-parse HEAD)
+git reset -q --hard HEAD~1
+printf 'x\n' >>tracked && git salvage snapshot -m s1 >/dev/null
+printf 'y\n' >>tracked && git salvage snapshot -m s2 >/dev/null
+printf 'u\n' >'un tracked'
+# A newer mtime makes the index stat-dirty: a status that may write the
+# index would rewrite it now.
+touch -t 203001010000 other
+before=$(view_state)
+out=$(git salvage view -o "$WORK/v.html" --no-open)
+check "view: exits 0" test $? = 0
+check "view: says where it wrote" test "$out" = "wrote $WORK/v.html"
+check "view: repo unchanged (refs, reflogs, index bytes, work tree)" test "$(view_state)" = "$before"
+check "view: page is the template around the data" view_frame "$WORK/v.html"
+view_decode "$WORK/v.html" "$WORK/v.data"
+D="$WORK/v.data"
+check "view data: version" test "$(head -n 1 "$D")" = "V|1"
+check "view data: meta" grep -qx "M|${R##*/}|[0-9]*|$(git --version)" "$D"
+check "view data: head" grep -qx "H|refs/heads/main|$(git rev-parse HEAD)" "$D"
+check "view data: status branch" grep -qx "S|# branch.head main" "$D"
+check "view data: status modified" grep -q "^S|1 \.M .* tracked$" "$D"
+check "view data: status untracked with space" grep -qx "S|? un tracked" "$D"
+exp_refs() {
+	printf 'R|refs/heads/feature|%s|||\n' "$(git rev-parse feature)"
+	printf 'R|refs/heads/main|%s||refs/remotes/origin/main|\n' "$(git rev-parse main)"
+	printf 'R|refs/remotes/origin/main|%s|||\n' "$(git rev-parse origin/main)"
+	printf 'R|refs/tags/light|%s|||\n' "$(git rev-parse feature)"
+	printf 'R|refs/tags/v1|%s|%s||\n' "$(git rev-parse v1)" "$(git rev-parse feature)"
+}
+check "view data: refs (annotated tag peeled, upstream)" test "$(grep '^R|' "$D")" = "$(exp_refs)"
+check "view data: commits = reachable + left behind by reset" \
+	test "$(vids C "$D")" = "$( (git rev-list HEAD --branches --remotes --tags && echo "$LEFT") | LC_ALL=C sort)"
+check "view data: commit fields" grep -qx "C|$(git rev-parse feature)|$(git rev-parse main)|$(git log -1 --format=%ct feature)|tester|feat" "$D"
+check "view data: reflog has the reset" grep -q "^L|HEAD@{[0-9]*}|$(git rev-parse HEAD)|reset: moving to HEAD~1$" "$D"
+check "view data: reflog has the left-behind commit" grep -q "^L|refs/heads/main@{[0-9]*}|$LEFT|commit: left$" "$D"
+check "view data: reflog of every ref, same count as git" \
+	test "$(vlines L "$D")" = "$(git log -g --format=tformat:x HEAD refs/heads/feature refs/heads/main refs/remotes/origin/main | wc -l | tr -d ' ')"
+check "view data: snapshots newest first" test "$(grep '^P|' "$D" | cut -d'|' -f2,5)" = "$(git for-each-ref --sort=-refname --format='%(refname)|%(subject)' refs/salvage/)"
+check "view data: snapshot fields" grep -qx "P|[^|]*|[0-9a-f]*|[0-9]*|s2|$(git rev-parse HEAD)|Salvage-Kind: worktree$(printf '\037')Salvage-Head: refs/heads/main" "$D"
+check "view: default output in .git" sh -c 'git salvage view --no-open >/dev/null && test -s .git/salvage-view.html'
+
+# Subjects that could break out of a <script> or an attribute.
+new_repo
+SUBJ="a </script><b>\"q\" 'x' & $(printf 'caf\303\251 \344\270\255')"
+git commit -q --allow-empty -m "$SUBJ"
+git salvage view -o "$WORK/v2.html" --no-open >/dev/null
+view_decode "$WORK/v2.html" "$WORK/v2.data"
+check "view special subject: survives byte-exact" grep -qxF "C|$(git rev-parse HEAD)|$(git rev-parse HEAD~1)|$(git log -1 --format=%ct)|tester|$SUBJ" "$WORK/v2.data"
+check "view special subject: no raw </script> added to the page" \
+	test "$(grep -c '</script>' "$WORK/v2.html")" = "$(grep -c '</script>' "$VIEW_TPL")"
+
+# -n limits the commits.
+for i in 1 2 3; do git commit -q --allow-empty -m "c$i"; done
+git salvage view -o "$WORK/v3.html" -n 2 --no-open >/dev/null
+view_decode "$WORK/v3.html" "$WORK/v3.data"
+check "view -n 2: two newest commits" test "$(grep '^C|' "$WORK/v3.data" | cut -d'|' -f6)" = "$(printf 'c3\nc2')"
+
+# Detached HEAD.
+git checkout -q --detach HEAD~1
+git salvage view -o "$WORK/v4.html" --no-open >/dev/null
+view_decode "$WORK/v4.html" "$WORK/v4.data"
+check "view detached: head record" grep -qx "H||$(git rev-parse HEAD)" "$WORK/v4.data"
+check "view detached: status says detached" grep -qx "S|# branch.head (detached)" "$WORK/v4.data"
+
+# Bad arguments: refused, nothing written.
+for a in "-n 0" "-n x" "-n" "-o" "--bogus" "extra"; do
+	# shellcheck disable=SC2086 # split on purpose
+	check "view refuses '$a'" sh -c '! git salvage view --no-open $1 >/dev/null 2>&1 && test ! -e .git/salvage-view.html' _ "$a"
+done
+
+# Unborn HEAD: no commits, no reflog.
+N=$((N + 1))
+git init -q "$WORK/r$N" && cd "$WORK/r$N" || exit 1
+printf 'u\n' >u
+check "view unborn: exits 0" sh -c 'git salvage view -o "$1" --no-open >/dev/null' _ "$WORK/v5.html"
+view_decode "$WORK/v5.html" "$WORK/v5.data"
+check "view unborn: head record" grep -qx "H|refs/heads/main|" "$WORK/v5.data"
+check "view unborn: no commits, no reflog" test "$(vlines C "$WORK/v5.data") $(vlines L "$WORK/v5.data")" = "0 0"
+check "view unborn: status" grep -qx "S|# branch.oid (initial)" "$WORK/v5.data"
+check "view outside a repo fails" sh -c 'cd "$1" && ! git salvage view --no-open >/dev/null 2>&1' _ "$WORK"
+cd "$R" || exit 1
+
 # ---------------------------------------------------------- install / uninstall
 
 SHIMDIR="$WORK/shimbin"
@@ -450,14 +571,16 @@ SPATH="$SHIMDIR:$ORIG_PATH"
 check "install: exits 0" sh -c 'git salvage install --dir "$1" >/dev/null' _ "$SHIMDIR"
 check "install: shim in place" test -x "$SHIMDIR/git"
 check "install: git-salvage beside it" test -x "$SHIMDIR/git-salvage"
+check "install: view template beside it" test -f "$SHIMDIR/git-salvage-view.html"
 check "install: twice is fine" sh -c 'git salvage install --dir "$1" >/dev/null' _ "$SHIMDIR"
 check "install from an installed copy" sh -c '"$1/git-salvage" install --dir "$2" >/dev/null && test -x "$2/git"' _ "$SHIMDIR" "$WORK/shim2"
 mkdir -p "$WORK/foreign" && printf 'not ours\n' >"$WORK/foreign/git"
 check "install refuses a foreign git" sh -c '! git salvage install --dir "$1" >/dev/null 2>&1' _ "$WORK/foreign"
 check "uninstall refuses a foreign git" sh -c '! git salvage uninstall --dir "$1" >/dev/null 2>&1' _ "$WORK/foreign"
 check "foreign git untouched" test "$(cat "$WORK/foreign/git")" = "not ours"
+check "view from an installed copy" sh -c '"$1/git-salvage" view -o "$2" --no-open >/dev/null && test -s "$2"' _ "$WORK/shim2" "$WORK/v6.html"
 check "uninstall: exits 0" sh -c 'git salvage uninstall --dir "$1" >/dev/null' _ "$WORK/shim2"
-check "uninstall: files gone" test ! -e "$WORK/shim2/git" -a ! -e "$WORK/shim2/git-salvage"
+check "uninstall: files gone" test ! -e "$WORK/shim2/git" -a ! -e "$WORK/shim2/git-salvage" -a ! -e "$WORK/shim2/git-salvage-view.html"
 
 # ---------------------------------------------------------- shim: transparency
 
@@ -583,6 +706,44 @@ out=$(git salvage doctor 2>&1)
 rc=$?
 check "doctor without the shim: exit 1" test "$rc" = 1
 check "doctor without the shim: says NO" contains "it is the git-salvage shim: NO" "$out"
+
+# ---------------------------------------------------------- view page logic (JS)
+
+# The template's LOGIC block + tests/view-test.js, run under JXA where there
+# is one (macOS: osascript, often no node), else node. JXA first, so the macOS
+# CI job tests the JXA path although its runner has node too. Each "ok" /
+# "not ok" line is one check.
+TPL="$ROOT/bin/git-salvage-view.html"
+check "view js: one BEGIN/END LOGIC pair" \
+	test "$(grep -c -x '// BEGIN LOGIC' "$TPL") $(grep -c -x '// END LOGIC' "$TPL")" = "1 1"
+{ sed -n '/^\/\/ BEGIN LOGIC$/,/^\/\/ END LOGIC$/p' "$TPL" && cat "$ROOT/tests/view-test.js"; } >"$WORK/view-test.js"
+if command -v osascript >/dev/null 2>&1; then
+	echo "view js: osascript -l JavaScript"
+	jsout=$(bounded 60 osascript -l JavaScript "$WORK/view-test.js" 2>&1)
+elif command -v node >/dev/null 2>&1; then
+	echo "view js: node $(node --version 2>/dev/null)"
+	jsout=$(bounded 60 node "$WORK/view-test.js" 2>&1)
+else
+	jsout="# neither node nor osascript found"
+fi
+jsn=0
+while IFS= read -r line; do
+	case $line in
+	"ok "*)
+		check "view js: ${line#ok }" true
+		jsn=$((jsn + 1))
+		;;
+	"not ok "*)
+		check "view js: ${line#not ok }" false
+		jsn=$((jsn + 1))
+		;;
+	"done "*) ;;
+	*) echo "  $line" ;;
+	esac
+done <<EOF
+$jsout
+EOF
+check "view js: ran to the end (done $jsn)" test "$(printf '%s\n' "$jsout" | tail -n 1)" = "done $jsn"
 
 echo "tests: $PASS/$TOTAL passed"
 [ "$PASS" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]
