@@ -10,6 +10,8 @@
 #   Q6  default expiry of reflog entries whose commit is on no branch
 #   Q5  messages of rename, rebase --abort, a merge concluded by commit, clone,
 #       a fast-forward pull
+#   Q7  a rebase's finish entries on HEAD and on the branch: same second,
+#       same commit?
 # Usage: bash dev/measure-reflog.sh [<locale to compare with C>]
 set -u
 LOC=${1:-zh_TW.UTF-8}
@@ -128,6 +130,15 @@ echo "== Q5 more messages: rename, rebase --abort, merge resolved by commit, clo
 	git log -g --format='%gD | %gs' HEAD refs/heads/main refs/remotes/origin/main
 ) | sed 's/@{[0-9]*}//'
 (cd "$HOME/q5" && git log -g --format='%gD | %gs' HEAD refs/heads/b2 refs/heads/main | sed 's/@{[0-9]*}//' | sed '1!G;h;$!d')
+echo "== Q7 a rebase's finish on HEAD and on the branch: <ref>@{<time>} <commit> <message>"
+(
+	git init -q "$HOME/q7" && cd "$HOME/q7" || exit 1
+	echo a >a && git add a && git commit -qm a
+	git switch -q -c b && echo b >b && git add b && git commit -qm b
+	git switch -q main && echo m >m && git add m && git commit -qm m
+	git switch -q b && git rebase -q main
+	git log -g --date=unix --format='%gD %H %gs' HEAD refs/heads/b | grep -F '(finish)'
+)
 for days in 29 31; do
 	echo "== Q6 default reflog expiry: entries dated $days days ago, dry run (prune lines)"
 	(

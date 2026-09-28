@@ -42,8 +42,10 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 .area ul { margin: 6px 0 0; padding-left: 18px; max-height: 9em; overflow: auto; }
 .area li { overflow-wrap: anywhere; }
 .arrow { flex: 0 0 auto; display: flex; flex-direction: column; justify-content: center; gap: 4px; font-size: 12px; color: var(--muted); text-align: center; }
+.arrow .narrow { display: none; }
 .cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; }
-@media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } .arrow { flex-direction: row; width: 100%; justify-content: center; } }
+@media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } .arrow { flex-direction: row; width: 100%; justify-content: center; gap: 4px 24px; }
+	.arrow .wide { display: none; } .arrow .narrow { display: inline; } }
 #graph { overflow-x: auto; }
 .row { display: flex; align-items: center; height: 26px; white-space: nowrap; border-radius: 4px; }
 .row svg { flex: 0 0 auto; display: block; }
@@ -67,7 +69,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 #timeline .moves { margin-top: 3px; }
 #timeline .note { margin-top: 4px; color: var(--warn); }
 #timeline .undo { margin-top: 4px; }
-.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-top: 8px; }
+.legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 12px; margin-top: 8px; }
+.legend .pair { display: inline-flex; gap: 6px; align-items: baseline; }
 details summary { cursor: pointer; }
 .empty { color: var(--muted); padding: 8px 0; }
 </style>
@@ -89,11 +92,11 @@ details summary { cursor: pointer; }
 		<section class="panel">
 			<h2>Branches and commits</h2>
 			<div class="legend">
-				<span class="chip head">HEAD</span><span class="muted">where you are</span>
-				<span class="chip local">branch</span><span class="muted">your branch (a movable label on a commit)</span>
-				<span class="chip remote">origin/x</span><span class="muted">your copy of a remote branch, as of the last fetch</span>
-				<span class="chip tag">tag</span><span class="muted">a fixed label</span>
-				<span class="chip gone">grey</span><span class="muted">left behind: on no branch any more, only in the reflog</span>
+				<span class="pair"><span class="chip head">HEAD</span><span class="muted">where you are</span></span>
+				<span class="pair"><span class="chip local">branch</span><span class="muted">your branch (a movable label on a commit)</span></span>
+				<span class="pair"><span class="chip remote">origin/x</span><span class="muted">your copy of a remote branch, as of the last fetch</span></span>
+				<span class="pair"><span class="chip tag">tag</span><span class="muted">a fixed label</span></span>
+				<span class="pair"><span class="chip gone">grey</span><span class="muted">left behind: on no branch any more, only in the reflog</span></span>
 			</div>
 			<div id="graph"></div>
 		</section>
@@ -219,20 +222,37 @@ function buildEvents(reflog, snapshots) {
 	// branch entry joins the first one that has no move of that ref yet.
 	var events = [], headKey = {};
 	function key(e) { return e.time + " " + e.id + " " + e.msg; }
+	// A rebase's last step writes "<X> (finish): returning to refs/heads/B"
+	// to HEAD and "<X> (finish): refs/heads/B onto <id>" to B, in the same
+	// second and at the same commit (dev/measure-reflog.sh Q7): one event.
+	// B is the name in the message, which a later rename does not change.
+	function finishKey(e) {
+		var m = e.ref === "HEAD" ? /^(.* \(finish\)): returning to (refs\/heads\/.+)$/.exec(e.msg) :
+			/^(.* \(finish\)): (refs\/heads\/.+) onto [0-9a-f]+$/.exec(e.msg);
+		return m ? "finish " + e.time + " " + e.id + " " + m[1] + " " + m[2] : null;
+	}
+	function add(k, ev) {
+		if (!Object.prototype.hasOwnProperty.call(headKey, k)) headKey[k] = [];
+		headKey[k].push(ev);
+	}
+	function find(k, ref) {
+		var same = null;
+		(k !== null && Object.prototype.hasOwnProperty.call(headKey, k) ? headKey[k] : []).forEach(function (h) {
+			if (!same && !h.moves.some(function (m) { return m.ref === ref; })) same = h;
+		});
+		return same;
+	}
 	reflog.forEach(function (e, k) {
 		if (e.ref !== "HEAD") return;
 		var ev = { type: "reflog", time: e.time, msg: e.msg, id: e.id, old: e.old, order: k,
 			moves: [{ ref: "HEAD", old: e.old, id: e.id }] };
-		if (!Object.prototype.hasOwnProperty.call(headKey, key(e))) headKey[key(e)] = [];
-		headKey[key(e)].push(ev);
+		add(key(e), ev);
+		if (finishKey(e) !== null) add(finishKey(e), ev);
 		events.push(ev);
 	});
 	reflog.forEach(function (e, k) {
 		if (e.ref === "HEAD") return;
-		var same = null;
-		(Object.prototype.hasOwnProperty.call(headKey, key(e)) ? headKey[key(e)] : []).forEach(function (h) {
-			if (!same && !h.moves.some(function (m) { return m.ref === e.ref; })) same = h;
-		});
+		var same = find(key(e), e.ref) || find(finishKey(e), e.ref);
 		if (same) { same.moves.push({ ref: e.ref, old: e.old, id: e.id }); return; }
 		events.push({ type: "reflog", time: e.time, msg: e.msg, id: e.id, old: e.old, order: k,
 			moves: [{ ref: e.ref, old: e.old, id: e.id }] });
@@ -367,6 +387,27 @@ function reachable(commits, tips) {
 	return seen;
 }
 
+// Events (newest first) -> for each, the commits it left behind: a move's
+// old commit that is loaded, reachable from no ref now (`reach`), and not an
+// ancestor of the move's new commit (a commit on top of X leaves nothing
+// behind). Each commit is named once, at its newest such event: a rebase
+// moves HEAD off X at its start but the branch only at its finish.
+function leftBehind(events, commits, reach) {
+	var loaded = {}, named = {};
+	commits.forEach(function (c) { loaded[c.id] = true; });
+	return events.map(function (ev) {
+		var out = [];
+		ev.moves.forEach(function (m) {
+			var o = m.old;
+			if (!o || o === m.id || !loaded[o] || reach[o] || named[o]) return;
+			if (m.id && reachable(commits, [m.id])[o]) return;
+			named[o] = true;
+			out.push(o);
+		});
+		return out;
+	});
+}
+
 // Lane layout. Each row: col (the commit's lane), top segments [from, to]
 // drawn from the row's top edge to its middle, bottom segments [from, to]
 // from the middle to the bottom edge; `from`/`to` are lane numbers.
@@ -483,18 +524,25 @@ function whereSentence(st, head) {
 		}
 		return a;
 	}
+	// ← / → between the areas side by side; ↑ / ↓ when they stack.
 	function arrow(fwd, back) {
-		var a = el("div", "arrow");
-		a.appendChild(el("code", "", fwd));
-		a.appendChild(el("code", "", back));
+		var a = el("div", "arrow"), f = el("code", ""), b = el("code", "");
+		f.appendChild(el("span", "wide", "← "));
+		f.appendChild(el("span", "narrow", "↑ "));
+		f.appendChild(document.createTextNode(fwd));
+		b.appendChild(document.createTextNode(back));
+		b.appendChild(el("span", "wide", " →"));
+		b.appendChild(el("span", "narrow", " ↓"));
+		a.appendChild(f);
+		a.appendChild(b);
 		return a;
 	}
 	var hc = byId[d.head.id];
 	areas.appendChild(area("Last commit (HEAD)", d.head.id ? short(d.head.id) : "none",
 		hc ? hc.subject : "saved history; safe", null));
-	areas.appendChild(arrow("← git commit", "git restore --staged →"));
+	areas.appendChild(arrow("git commit", "git restore --staged"));
 	areas.appendChild(area("Staging area (index)", st.staged.length, "what the next commit will contain", st.staged));
-	areas.appendChild(arrow("← git add", "git restore →"));
+	areas.appendChild(arrow("git add", "git restore"));
 	var wt = st.modified.concat(st.conflicted.map(function (p) { return p + "  (conflict)"; }),
 		st.untracked.map(function (p) { return p + "  (untracked)"; }));
 	areas.appendChild(area("Working tree (your files)", wt.length,
@@ -561,7 +609,7 @@ function whereSentence(st, head) {
 	});
 
 	// ---- the timeline
-	var events = buildEvents(d.reflog, d.snapshots), branches = {};
+	var events = buildEvents(d.reflog, d.snapshots), branches = {}, lost = leftBehind(events, d.commits, reach);
 	d.refs.forEach(function (r) { if (/^refs\/heads\//.test(r.name)) branches[refShort(r.name)] = true; });
 	var tl = document.getElementById("timeline"), selected = null;
 	if (!events.length) tl.appendChild(el("li", "empty", "Nothing recorded yet."));
@@ -582,7 +630,7 @@ function whereSentence(st, head) {
 		if (ev.type === "snapshot" && ev.id && rowEl[ev.id]) { rowEl[ev.id].classList.add("sel-new"); first = rowEl[ev.id]; }
 		if (first) first.scrollIntoView({ block: "nearest", behavior: "smooth" });
 	}
-	events.forEach(function (ev) {
+	events.forEach(function (ev, k) {
 		var li = el("li");
 		li.appendChild(el("span", "when", when(ev.time)));
 		li.lastChild.title = full(ev.time);
@@ -597,14 +645,13 @@ function whereSentence(st, head) {
 			if (ex.text) li.appendChild(el("div", "", ex.text));
 			var mv = el("div", "moves muted mono");
 			mv.textContent = ev.moves.map(function (m) {
-				return (m.ref === "HEAD" ? "HEAD" : refShort(m.ref)) + ": " + (m.old ? short(m.old) : "?") + " → " + short(m.id);
+				// No old id: the ref's oldest entry we have (a new branch, or a
+				// remote ref whose clone wrote no entry).
+				return (m.ref === "HEAD" ? "HEAD" : refShort(m.ref)) + ": " +
+					(m.old ? short(m.old) + " → " : "set to ") + short(m.id);
 			}).join("   ");
 			li.appendChild(mv);
-			var lost = {};
-			ev.moves.forEach(function (m) {
-				if (m.old && m.old !== m.id && byId[m.old] && !reach[m.old]) lost[m.old] = true;
-			});
-			Object.keys(lost).forEach(function (id) {
+			lost[k].forEach(function (id) {
 				var n = el("div", "note");
 				n.appendChild(document.createTextNode("Left behind: " + short(id) + " is on no branch now. To keep it: "));
 				n.appendChild(el("code", "", "git branch rescue-" + short(id) + " " + short(id)));

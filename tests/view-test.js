@@ -152,6 +152,35 @@ test("buildEvents: snapshots sort by time, and after the same second's reflog en
 	return eq(ev.map(function (e) { return e.type === "snapshot" ? "s" + e.snap.n : e.msg; }),
 		["commit: later", "reset: moving to HEAD~1", "commit: same second", "s1", "s2", "commit: before", "s3"]);
 });
+// A rebase of branch b, which is then renamed to b2 (the reflog moves with
+// the branch; the messages keep the old name). Messages from Q7.
+var REBASE = [
+	L("refs/heads/b2", 40, C, "Branch: renamed refs/heads/b to refs/heads/b2"),
+	L("HEAD", 30, C, "rebase (finish): returning to refs/heads/b"),
+	L("HEAD", 30, C, "rebase (pick): b"),
+	L("HEAD", 30, B, "rebase (start): checkout main"),
+	L("HEAD", 20, A, "commit: b"),
+	L("refs/heads/b2", 30, C, "rebase (finish): refs/heads/b onto " + B),
+	L("refs/heads/b2", 20, A, "commit: b")];
+test("buildEvents: a rebase's finish on HEAD and on the branch are one event", function () {
+	var ev = buildEvents(REBASE, []);
+	return eq(ev.map(function (e) { return [e.msg, e.moves.map(function (m) { return [m.ref, m.old, m.id]; })]; }), [
+		["Branch: renamed refs/heads/b to refs/heads/b2", [["refs/heads/b2", C, C]]],
+		["rebase (finish): returning to refs/heads/b", [["HEAD", C, C], ["refs/heads/b2", A, C]]],
+		["rebase (pick): b", [["HEAD", B, C]]],
+		["rebase (start): checkout main", [["HEAD", A, B]]],
+		["commit: b", [["HEAD", null, A], ["refs/heads/b2", null, A]]]]);
+});
+test("buildEvents: pull --rebase finish merged; other branch, time or id not", function () {
+	var ev = buildEvents([
+		L("HEAD", 30, C, "pull -q --rebase origin main (finish): returning to refs/heads/main"),
+		L("refs/heads/main", 30, C, "pull -q --rebase origin main (finish): refs/heads/main onto " + B),
+		L("HEAD", 20, C, "rebase (finish): returning to refs/heads/x"),
+		L("refs/heads/x", 20, C, "rebase (finish): refs/heads/y onto " + B),
+		L("refs/heads/x", 19, C, "rebase (finish): refs/heads/x onto " + B),
+		L("refs/heads/x", 20, D, "rebase (finish): refs/heads/x onto " + B)], []);
+	return eq(ev.map(function (e) { return e.moves.length; }), [2, 1, 1, 1, 1]);
+});
 test("buildEvents: snapshot event points at its first parent", function () {
 	var ev = buildEvents([], [{ n: 1, time: 5, parent: A }]);
 	return eq([ev[0].id, ev[0].old, ev[0].moves], [A, null, []]);
@@ -293,6 +322,35 @@ test("reachable: side commit and unloaded parent ignored", function () {
 });
 test("reachable: no tips, nothing", function () {
 	return eq(keys(reachable(GRAPH, [])), []);
+});
+
+// ----------------------------------------------------------------- leftBehind
+
+// The REBASE history: A (the old b) on O, rebased to C on B. Only b2 = C and
+// main = B are refs now, so A is left behind, and only by the finish.
+var RGRAPH = [{ id: C, parents: [B] }, { id: A, parents: ["O"] }, { id: B, parents: ["O"] }, { id: "O", parents: [] }];
+test("leftBehind: named once, at the newest move off it (rebase finish, not start)", function () {
+	var ev = buildEvents(REBASE, []);
+	return eq(leftBehind(ev, RGRAPH, reachable(RGRAPH, [C, B])), [[], [A], [], [], []]);
+});
+test("leftBehind: a commit on top of X does not leave X behind", function () {
+	// O -> A -> C, then reset back to O: C is left behind by the reset;
+	// A (also on no branch) is behind C, not left by the commit that made C.
+	var g = [{ id: C, parents: [A] }, { id: A, parents: ["O"] }, { id: "O", parents: [] }];
+	var ev = buildEvents([
+		L("HEAD", 30, "O", "reset: moving to HEAD~2"),
+		L("HEAD", 20, C, "commit: c"),
+		L("HEAD", 10, A, "commit: a")], []);
+	return eq(leftBehind(ev, g, reachable(g, ["O"])), [[C], [], []]);
+});
+test("leftBehind: reachable, unloaded, or unchanged old commits are not named", function () {
+	var g = [{ id: B, parents: [A] }, { id: A, parents: [] }, { id: D, parents: [] }];
+	var ev = [
+		{ moves: [{ ref: "HEAD", old: A, id: D }] }, // A reachable from B
+		{ moves: [{ ref: "HEAD", old: C, id: D }] }, // C not loaded
+		{ moves: [{ ref: "HEAD", old: D, id: D }] }, // no move
+		{ moves: [{ ref: "HEAD", old: null, id: D }] }];
+	return eq(leftBehind(ev, g, reachable(g, [B])), [[], [], [], []]);
 });
 
 // --------------------------------------------------------------------- layout

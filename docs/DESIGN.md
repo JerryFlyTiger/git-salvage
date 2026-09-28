@@ -276,6 +276,13 @@ only):
   run also prunes the entry `commit (initial): kept`, whose commit is still
   on the branch; 2.43.0 keeps it. Why was not measured; the commit itself
   stays reachable, and the page's claim is only about left-behind ones.
+- A rebase's last step writes `<X> (finish): returning to refs/heads/<b>`
+  to `HEAD` and `<X> (finish): refs/heads/<b> onto <id>` to the branch, in
+  the same second and at the same commit (Q7; `<X>` is `rebase` or the
+  `pull ...` argv). `git log -g` puts all of a second's `HEAD` entries
+  before the branch's, so on their own the branch's finish would sort below
+  the rebase's start. `<b>` is the name at the time: a later
+  `branch -m` renames the reflog but not the messages in it.
 
 ### Data handed to the page
 
@@ -327,16 +334,22 @@ replaced them.
    time. A branch entry with the same time, new id and message as a `HEAD`
    entry is the same event (a commit moves both) and is shown once, naming
    the branch; two equal `HEAD` entries stay two events, each taking at most
-   one entry per branch. The event is explained for its local branch if it
+   one entry per branch. A rebase's finish on the branch joins the
+   `HEAD` finish with the same time, new id, `<X>` and `<b>` (Q7); if the
+   two ever fall in different seconds they stay two events. The event is explained for its local branch if it
    moved one (a clone also moves the remote ref). A `HEAD` entry with no
    branch entry is not called "detached": a deleted branch's reflog is gone
    (Q4), a branch may have no reflog, and the 300-entry cap on the reflogs
    (one cap over all refs, Q2) may cut its entry off; the
    text then says only what HEAD did. Each event gives the command, a plain-words explanation, and
-   before -> after ids (before = the same ref's next-older entry). Selecting
+   before -> after ids (before = the same ref's next-older entry; for a
+   ref's oldest entry we have, "set to <id>"). Selecting
    an event highlights both commits in the graph. When "before" is left
    behind, the event says so and gives `git branch <name> <id>` to get it
-   back. A snapshot event gives `git salvage restore <n>`.
+   back. "Left behind" is said once per commit, at the newest event that
+   moved a ref off it to a commit that does not contain it: a commit made
+   on top of X does not leave X behind (a later reset or rebase does), and
+   a rebase's start moves only `HEAD` off X, its finish moves the branch. A snapshot event gives `git salvage restore <n>`.
 
 Explanations are chosen by the message's action, the text before the first
 `: ` with a trailing ` (start|pick|finish|...)` and `pull`'s argv peeled off:
