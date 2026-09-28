@@ -22,6 +22,37 @@ asking.
   undefined; `console.log` goes to stderr, the script's final expression
   value goes to stdout.
 
+## Status (2026-09-28, Mac): step 4 done; next is CI, then merge
+
+**Resume here:** `git push origin v0.2-view`, read the CI run for the
+branch head (ubuntu, macos, shellcheck must all be green), then merge
+`v0.2-view` into main and push main. Delete this PLAN.md in the merge
+commit's tail (v0.1 did the same, df0b155); fold anything still useful
+into DESIGN.md first.
+
+Step 4 (commit bfb9ecd, cold-read once, no findings fixed so no tail):
+opened a generated page in Chrome on a demo repo (branches, merge, reset
+--hard, rebase, stash, detached HEAD, rename, clone + pull, tag, 3
+snapshots; commands 1 s apart, since the reflog has 1 s resolution).
+Fixed: rebase finish on the branch joined to the HEAD finish (oracle Q7);
+"Left behind" once per commit at the newest move off it, not for a commit
+made on top of it (leftBehind()); "set to <id>" instead of "? -> <id>";
+legend pairs unsplit; area arrows up/down when stacked. Local: `tests:
+346/346 passed`, shellcheck clean, 9 JS mutations KILLED.
+Notes: Chrome's extension cannot open file:// (served with `python3 -m
+http.server` on 127.0.0.1); headless Chrome's window is at least ~500 px
+wide, so its 390 px screenshots are cropped, not overflowing.
+
+Step-4 review findings recorded, not fixed (with reason):
+- leftBehind: when a move's new commit is outside the loaded window, the
+  ancestor check cannot see through it. Needs an old commit inside the
+  window whose descendant is outside it: date order makes that rare (clock
+  skew); the previous code had the same limit.
+- reachable() runs once per candidate move with no cache: milliseconds at
+  300 x 300.
+- The ←/→ vs ↑/↓ arrow glyphs switch by CSS display:none, not tested
+  (render code, checked by eye).
+
 ## Status (2026-09-27, end of the cloud session)
 
 Steps 1, 2, 3, 5, 6 of the list below are done in the cloud session on
