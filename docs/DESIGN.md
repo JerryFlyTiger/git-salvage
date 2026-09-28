@@ -249,10 +249,10 @@ transparency rule). The reflog already has, for every ref move, the new id,
 the time and a message naming the command -- also for commits made by tools
 that bypass the shim. The commands that move no ref (`restore`, `clean`,
 `checkout -- f`, `stash drop`) are exactly the ones that leave a snapshot,
-and a snapshot's subject is the command. Measured (`dev/measure-reflog.sh`,
-git 2.55.0 on macOS; items marked 2.43.0 were measured on Linux, where the
-Q1 messages, Q2 and Q4 also match -- the Q1 locale comparison was not run
-there):
+and a snapshot's subject is the command. Measured (`dev/measure-reflog.sh`)
+on git 2.55.0 (macOS) and 2.43.0 (Linux); the answers are the same on both
+except where a version is named (the Q1 locale comparison ran on 2.55.0
+only):
 
 - Reflog messages are not localized: the same history under `zh_TW.UTF-8` and
   `C` gives identical messages (Q1).
@@ -268,11 +268,14 @@ there):
   (capital `B`), `rebase (abort): returning to refs/heads/b2`,
   `commit (merge): Merge branch 'b2'` (a merge concluded by `commit` after a
   conflict), `clone: from <path>`, `pull -q --ff-only: Fast-forward` (and
-  `...: fast-forward` on the remote ref; measured on git 2.43.0). `git stash` writes
+  `...: fast-forward` on the remote ref). `git stash` writes
   `reset: moving to HEAD` to `HEAD`'s reflog.
 - A reflog entry whose commit is on no branch expires after 30 days by
   default: dated 29 days ago it is kept, 31 days ago `reflog expire` prunes
-  it (Q6, git 2.43.0). The page says so for left-behind commits.
+  it (Q6). The page says so for left-behind commits. On 2.55.0 the 31-day
+  run also prunes the entry `commit (initial): kept`, whose commit is still
+  on the branch; 2.43.0 keeps it. Why was not measured; the commit itself
+  stays reachable, and the page's claim is only about left-behind ones.
 
 ### Data handed to the page
 
@@ -297,16 +300,16 @@ name is replaced by a space.
 | `P` | refname, commit, unix time, subject, parents (space-separated), the `Salvage-Kind`, `Salvage-Ref` and `Salvage-Head` trailers as `Key: value` separated by U+001F | one `for-each-ref --sort=-refname refs/salvage/` |
 
 The trailers come from a single `%(trailers:key=...,key=...)` atom: with one
-atom per key in the same format, git 2.43 applies the union of all their keys
-to each atom (measured, Q3; not yet measured on 2.55, and one atom is right
-either way), so a kind would read `worktree,refs/heads/main`.
+atom per key in the same format, git 2.43.0 applies the union of all their
+keys to each atom, so a kind would read `worktree,refs/heads/main`; 2.55.0
+keeps the atoms independent (Q3). One atom is right on both.
 `P` records carry no number: they come newest first, and the page numbers
 them by that order (1 = newest), the same numbers as `git salvage list`.
 
 `-n` defaults to 300 commits and caps only the `C` records (the reflogs have
 their own fixed cap of 300 entries). It takes 1 to 9 digits, so bash
 arithmetic cannot wrap; git reads a leading zero as decimal anyway (`-n 010`
-is 10, measured on git 2.43.0). The reflog ids are included so that commits a
+is 10, Q2). The reflog ids are included so that commits a
 `reset` or `rebase` left behind are drawn (greyed) next to the ones that
 replaced them.
 

@@ -53,10 +53,16 @@ Notes for the Mac:
   390 px wide: no JS errors, no horizontal scroll, a subject with
   `<img onerror>` shown as text, Enter selects a timeline item.
 - Real bug found and fixed: on git 2.43 several `%(trailers:key=...)` atoms
-  in one for-each-ref format get the union of their keys (oracle Q3). Not
-  measured on 2.55: run `bash dev/measure-reflog.sh` on the Mac and note Q3
-  there in DESIGN.md. Q2's `-n 010`, Q5's ff pull and Q6 (30-day expiry)
-  were also measured only on 2.43.0 so far.
+  in one for-each-ref format get the union of their keys (oracle Q3).
+- 2026-09-28: the user ran `dev/measure-reflog.sh` on the Mac (git 2.55.0,
+  at e2f7326). Recorded in DESIGN.md: Q3 atoms are independent on 2.55.0
+  (the union is a 2.43 behaviour; one atom is right on both); Q2 (`-n 010`
+  = 10, missing ref / unborn HEAD exit 128, `-n` is a total), Q5 ff pull and
+  Q6 (29 days kept, 31 pruned) match 2.43.0. New on 2.55.0: the 31-day Q6
+  run also prunes `commit (initial): kept`, a still-reachable commit's
+  entry; reason not measured, the page's claim is unaffected. That commit
+  changed docs and comments only (DESIGN.md, PLAN.md, a dev/mutate.sh
+  comment): not cold-read.
 
 Review findings recorded, not fixed (with reason):
 - Layout: a parent outside the loaded window keeps its lane to the bottom
