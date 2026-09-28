@@ -170,6 +170,57 @@ mut "doctor: always exit 0" $S 'doctor without the shim: exit 1' \
 mut "doctor: git's exec-path not skipped" $S 'doctor with the shim' \
 	's/\t\t\[ "\$d" = "\$execdir" \] && continue\n//'
 
+mut "install: view template not copied" $S 'view template beside it' \
+	's/\tcopy_into "\$here\/\$VIEW_TEMPLATE" "\$DIR\/\$VIEW_TEMPLATE"\n\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" \|\| die "[^"]*"\n\tchmod 644 "\$DIR\/\$VIEW_TEMPLATE" \|\| die "[^"]*"\n/\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" || die "x"\n/'
+mut "uninstall: view template kept" $S 'uninstall: files gone' \
+	's/for f in git git-salvage "\$VIEW_TEMPLATE"; do/for f in git git-salvage; do/'
+
+# --- view (bash side)
+mut "view: status may write the index" $S 'view: repo unchanged' \
+	's/git --no-optional-locks status --porcelain=v2/git status --porcelain=v2/'
+mut "view: reflog ids not drawn" $S 'left behind by reset' \
+	's/\{ \[ -z "\$ids" \] \|\| printf .%s\\n. "\$ids"; \} \|/{ :; } |/'
+mut "view: -n ignored" $S 'view -n 2' \
+	's/--date-order -n "\$max"/--date-order -n 300/'
+mut "view: one trailer key only" $S 'view data: snapshot fields' \
+	's/key=Salvage-Kind,key=Salvage-Ref,key=Salvage-Head/key=Salvage-Kind/'
+mut "view: data not base64" $S 'view data' \
+	's/view_data "\$max" \| base64 >"\$raw"/view_data "\$max" >"\$raw"/'
+mut "view: unborn HEAD given to log -g" $S 'view unborn' \
+	's/\tif \[ -n "\$head" \]; then refs\+=\(HEAD\); fi\n\tall=/\trefs+=(HEAD)\n\tall=/'
+
+# --- view (page logic, tests/view-test.js)
+V=bin/git-salvage-view.html
+mut "view js: passing lane loses its bottom" $V 'layout: branch and merge' \
+	's/if \(passing\[j\] && lanes\[j\] !== null\)/if (passing[j] \&\& lanes[j] !== null \&\& !fromCommit[j])/'
+mut "view js: checkout target always a branch" $V 'not a local branch' \
+	's/m && branches && Object.prototype.hasOwnProperty.call\(branches, m\[2\]\)/m/'
+mut "view js: snapshots numbered from 0" $V 'parseData: snapshots' \
+	's/s\.n = k \+ 1;/s.n = k;/'
+mut "view js: HEAD and branch entries not merged" $V 'one event' \
+	's/if \(same\) \{/if (false) {/'
+mut "view js: unknown phase explained" $V 'unknown messages' \
+	's/else if \(phase === "merge"\) r\.text/else r.text/'
+
+mut "view js: HEAD-only entry treated as a branch" $V 'no branch entry, nothing said' \
+	's/var br = onBranch !== false;/var br = true;/'
+mut "view js: event ref = second move" $V 'eventRef' \
+	's/if \(\/\^refs\\\/heads\\\/\/\.test\(moves\[i\]\.ref\)\) return moves\[i\]\.ref;/if (i === 1) return moves[i].ref;/'
+mut "view js: equal HEAD entries collapse" $V 'two equal HEAD entries' \
+	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === e\.ref; \}\)\) same = h;/same = h;/'
+# Not listed: dropping max=$((10#$max)). git reads -n 010 as 10 too
+# (measured, git 2.43.0 and 2.55.0), so it is an equivalent mutation.
+mut "view: -n 00 accepted" $S "view refuses '-n 00'" \
+	's/\t\[ "\$\(\(10#\$max\)\)" -gt 0 \] \|\| die "[^"]*"\n//'
+mut "view: 10-digit -n accepted" $S "view refuses '-n 1234567890'" \
+	's/ \| \?\?\?\?\?\?\?\?\?\?\*\) die "not a commit count/) die "not a commit count/'
+mut "view: -o <dir> accepted" $S 'adir' \
+	's/\t\[ ! -d "\$out" \] \|\| die "[^"]*"\n//'
+mut "view: newline kept in the repo name" $S 'newline in the repo name keeps' \
+	's/ \| tr .\\n. . .\)/)/'
+mut "view: data may end without a newline" $S 'base64 without a final newline' \
+	's/if \[ -n "\$\(tail -c 1 "\$raw"\)" \]; then/if false; then/'
+
 wait
 echo "== mutations ($I)"
 cat "$SCR"/m*/result 2>/dev/null | sort

@@ -53,7 +53,7 @@ Requires bash (macOS's `/bin/bash` 3.2 is enough) and git.
 ```console
 $ git clone https://github.com/JerryFlyTiger/git-salvage
 $ git-salvage/bin/git-salvage install
-installed /Users/you/.local/share/git-salvage/bin/git and /Users/you/.local/share/git-salvage/bin/git-salvage
+installed /Users/you/.local/share/git-salvage/bin/git, /Users/you/.local/share/git-salvage/bin/git-salvage and /Users/you/.local/share/git-salvage/bin/git-salvage-view.html
 add this line to your shell profile (then open a new shell):
   export PATH="/Users/you/.local/share/git-salvage/bin:$PATH"
 ```
@@ -70,7 +70,8 @@ real git: /opt/homebrew/bin/git
 ```
 
 `install --dir D` installs somewhere else. `git salvage uninstall` removes the
-two files; snapshots already taken stay in each repo under `refs/salvage/`.
+three files (`git`, `git-salvage`, `git-salvage-view.html`); snapshots
+already taken stay in each repo under `refs/salvage/`.
 
 ## What triggers a snapshot
 
@@ -99,6 +100,7 @@ git salvage restore <n> [--index] [-- <path>...]
 git salvage snapshot [-m <message>]
 git salvage drop <n>
 git salvage prune [--keep <k>] [--older-than <days>]
+git salvage view [-o <file>] [-n <max-commits>] [--no-open]
 git salvage install [--dir <dir>] | uninstall [--dir <dir>] | doctor
 ```
 
@@ -114,6 +116,26 @@ Snapshots are numbered 1 = newest.
 Settings: `GIT_SALVAGE_QUIET=1` or `salvage.quiet=true` hides the
 `saved snapshot` line; `GIT_SALVAGE_SKIP=1` runs one command without a
 snapshot; `GIT_SALVAGE_REAL_GIT=/path/to/git` names the real git.
+
+## See what git did: `git salvage view`
+
+`git salvage view` writes one self-contained web page (by default
+`.git/salvage-view.html`, so it is never committed) and opens it in your
+browser. It shows:
+
+- where you are: the branch, ahead/behind its upstream, what is uncommitted;
+- the three areas (last commit, staged, working tree) and which command moves
+  changes between them;
+- the branches as a graph, with the commits a `reset` or `rebase` left behind
+  drawn greyed next to the ones that replaced them;
+- a timeline of recent commands, newest first, each explained in plain words,
+  with the commit it moved from and to, and the command that gets a lost
+  commit or a snapshot back.
+
+The timeline comes from git's own reflog and the snapshots, so it also covers
+commands run without the shim. The page is read-only (it changes no ref, no
+file and not the index), loads nothing from the network, and needs no server.
+`-n` caps the commits drawn (default 300); `--no-open` only writes the file.
 
 ## Limits
 
@@ -133,9 +155,13 @@ The full design, with the measurements behind each decision, is in
 
 ```bash
 bash tests/run.sh      # prints "tests: N/M passed"
-shellcheck bin/git-salvage shim/git tests/run.sh
+shellcheck bin/git-salvage shim/git tests/run.sh dev/*.sh
 dev/mutate.sh          # breaks the code one way at a time; every line should say KILLED
 ```
+
+The view page's logic (between `BEGIN LOGIC` / `END LOGIC` in
+`bin/git-salvage-view.html`) is tested by `tests/view-test.js`, which
+`tests/run.sh` runs with `osascript -l JavaScript` on macOS, else `node`.
 
 ## License
 

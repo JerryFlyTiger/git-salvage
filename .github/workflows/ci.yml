@@ -22,6 +22,12 @@ jobs:
         run: |
           /bin/bash tests/run.sh | tee test.log
           grep -Eq '^tests: ([0-9]+)/\1 passed$' test.log
+      # The page logic must have run, under JXA on macOS (the fallback that
+      # the user's Mac relies on) and under node on ubuntu.
+      - name: view js runtime
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then want=osascript; else want=node; fi
+          grep -Eq "^view js: $want" test.log
 
   shellcheck:
     runs-on: ubuntu-latest
