@@ -373,6 +373,32 @@ event merging) is plain functions between `BEGIN LOGIC` / `END LOGIC` in the
 template, run by `tests/view-test.js` under `node`, or `osascript -l
 JavaScript` on macOS (no node there by default). The logic avoids browser-only
 APIs; only the decoding and drawing code outside the markers uses them.
+Measured under JXA: ES6 works (arrow, template, Map, spread); `atob` and
+`TextDecoder` are undefined; `console.log` goes to stderr and the script's
+final expression value to stdout. CI's macOS job runs the JXA path.
+
+Browser check (by hand, Chrome; Safari is not a target): a demo repo with
+branches, merge, reset --hard, rebase, stash, detached HEAD, rename, clone +
+pull, tag and snapshots, commands 1 s apart (the reflog has 1 s resolution).
+The Chrome extension cannot open `file://`, so the page was served with
+`python3 -m http.server` on 127.0.0.1. Headless Chrome's window is at least
+~500 px wide: its 390 px screenshots are cropped, not overflowing.
+
+Known limits of the page (reviewed, not fixed):
+- "Left behind": when a move's new commit is outside the loaded window, the
+  ancestor check cannot see through it. It needs an old commit inside the
+  window whose descendant is outside it, which date order makes rare (clock
+  skew).
+- A parent outside the loaded window keeps its lane to the bottom of the
+  graph (history continues past the window). Intended; pinned by a test.
+- `reachable()` runs once per candidate move with no cache: milliseconds at
+  300 x 300.
+- Timeline items have tabindex, Enter/Space and `aria-current`, but no role
+  (`role=button` broke the list semantics).
+- The `M` record turns a newline in the repo directory name into a space;
+  other control characters are kept (base64 carries them).
+- The ←/→ vs ↑/↓ arrow glyphs switch by CSS `display:none`; render code,
+  checked by eye, not tested.
 
 ## Coverage limits (documented, not bugs)
 
