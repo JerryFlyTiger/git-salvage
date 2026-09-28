@@ -207,7 +207,21 @@ mut "view js: HEAD-only entry treated as a branch" $V 'no branch entry, nothing 
 mut "view js: event ref = second move" $V 'eventRef' \
 	's/if \(\/\^refs\\\/heads\\\/\/\.test\(moves\[i\]\.ref\)\) return moves\[i\]\.ref;/if (i === 1) return moves[i].ref;/'
 mut "view js: equal HEAD entries collapse" $V 'two equal HEAD entries' \
-	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === e\.ref; \}\)\) same = h;/same = h;/'
+	's/if \(!same && !h\.moves\.some\(function \(m\) \{ return m\.ref === ref; \}\)\) same = h;/same = h;/'
+mut "view js: rebase finish not merged" $V 'finish on HEAD and on the branch are one event' \
+	's/ \|\| find\(finishKey\(e\), e\.ref\)//'
+mut "view js: finish key ignores time" $V 'other branch, time or id not' \
+	's/"finish " \+ e\.time \+ " " \+ e\.id/"finish " + e.id/'
+mut "view js: finish key ignores id" $V 'other branch, time or id not' \
+	's/"finish " \+ e\.time \+ " " \+ e\.id \+ " " \+/"finish " + e.time + " " +/'
+mut "view js: finish key ignores branch" $V 'other branch, time or id not' \
+	's/ \+ " " \+ m\[1\] \+ " " \+ m\[2\] :/ + " " + m[1] :/'
+mut "view js: left behind named at every move" $V 'named once' \
+	's/ \|\| reach\[o\] \|\| named\[o\]\) return;/ || reach[o]) return;/'
+mut "view js: left behind ignores ancestry" $V 'on top of X' \
+	's/\t+if \(m\.id && reachable\(commits, \[m\.id\]\)\[o\]\) return;\n//'
+mut "view js: left behind ignores reachable" $V 'reachable, unloaded' \
+	's/ \|\| reach\[o\] \|\|/ ||/'
 # Not listed: dropping max=$((10#$max)). git reads -n 010 as 10 too
 # (measured, git 2.43.0 and 2.55.0), so it is an equivalent mutation.
 mut "view: -n 00 accepted" $S "view refuses '-n 00'" \
