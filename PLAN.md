@@ -27,6 +27,12 @@ asking.
 Steps 1, 2, 3, 5, 6 of the list below are done in the cloud session on
 `v0.2-view`; **step 4 is next, on the Mac**. Not merged to main.
 
+**Cloud work on this project is finished (user, 2026-09-28).** From here on
+work continues in Claude Code on the Mac, so the Mac-only rules apply again
+(git-guard hook, implementation in the main conversation; the "Cloud
+handoff" section below is history). Safari is not a target: the user
+decided not to test or support it; step 4 uses the browser the user picks.
+
 Commits on `v0.2-view` after main (df0b155):
 
 | commit | what | cold-read |
