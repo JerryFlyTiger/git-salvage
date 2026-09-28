@@ -609,6 +609,35 @@ mkdir -p "$WORK/shim3" && printf 'x\n' >"$WORK/shim3/git-salvage-view.html"
 check "uninstall: names only what it removed" \
 	test "$(git salvage uninstall --dir "$WORK/shim3" | head -n 1)" = "removed $WORK/shim3/git-salvage-view.html"
 
+# The PATH hint after install: the login shell's syntax (dev/measure-shells.sh).
+# hint <shell> <dir> <path>: install into <dir> with that SHELL and PATH.
+hint() { env SHELL="$1" PATH="$3" git salvage install --dir "$2" 2>&1 | sed 1d; }
+out=$(hint /bin/zsh "$WORK/h1" "$PATH")
+check "install hint: zsh gets export" test "$out" = "add this line to your shell profile (then open a new shell):
+  export PATH=\"$WORK/h1:\$PATH\""
+out=$(hint /bin/tcsh "$WORK/h2" "$PATH")
+check "install hint: tcsh gets setenv" contains "  setenv PATH \"$WORK/h2:\$PATH\"" "$out"
+out=$(hint /bin/csh "$WORK/h3" "$PATH")
+check "install hint: csh gets setenv" contains "  setenv PATH \"$WORK/h3:\$PATH\"" "$out"
+out=$(hint /opt/homebrew/bin/fish "$WORK/h4" "$PATH")
+check "install hint: fish gets set -gx" contains "  set -gx PATH \"$WORK/h4\" \$PATH" "$out"
+out=$(hint '' "$WORK/h5" "$PATH")
+check "install hint: no SHELL gets export" contains "  export PATH=\"$WORK/h5:\$PATH\"" "$out"
+out=$(hint /bin/zsh "$WORK/h6" "$WORK/h6:$PATH")
+check "install hint: already first, zsh: rehash" test "$out" = "$WORK/h6 is already first on PATH; in shells that are already open, run:
+  rehash"
+out=$(hint /bin/bash "$WORK/h7" "$WORK/h7:$PATH")
+check "install hint: already first, bash: hash -r" contains "
+  hash -r" "$out"
+out=$(hint /bin/bash "$WORK/h8" "$PATH:$WORK/h8")
+check "install hint: on PATH after the real git" \
+	contains "$WORK/h8 is on PATH but after $REAL_GIT; move it in front" "$out"
+# PATH names the directory through a symlink: still recognised as on PATH.
+mkdir -p "$WORK/h9" && ln -s h9 "$WORK/h9link"
+out=$(hint /bin/bash "$WORK/h9" "$PATH:$WORK/h9link")
+check "install hint: PATH entry is a symlink to the dir" \
+	contains "$WORK/h9 is on PATH but after $REAL_GIT; move it in front" "$out"
+
 # ---------------------------------------------------------- shim: transparency
 
 # sgit: git as a user with the shim installed first on PATH reaches it.
@@ -729,6 +758,7 @@ out=$(sgit salvage doctor 2>&1)
 rc=$?
 check "doctor with the shim: exit 0" test "$rc" = 0
 check "doctor with the shim: says yes" contains "it is the git-salvage shim: yes" "$out"
+check "doctor with the shim: stale-shell note" contains "run hash -r / rehash in it)" "$out"
 out=$(git salvage doctor 2>&1)
 rc=$?
 check "doctor without the shim: exit 1" test "$rc" = 1

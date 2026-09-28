@@ -711,9 +711,53 @@ cmd_install() {
 	chmod 755 "$DIR/git" "$DIR/git-salvage" || die "cannot chmod files in $DIR"
 	chmod 644 "$DIR/$VIEW_TEMPLATE" || die "cannot chmod files in $DIR"
 	echo "installed $DIR/git, $DIR/git-salvage and $DIR/$VIEW_TEMPLATE"
+	path_hint
+}
+
+# What to do about PATH after an install, in the syntax of the login shell.
+# Measured (dev/measure-shells.sh): every shell finds the shim once PATH puts
+# it first, and setting PATH drops the shell's cached lookup of git; but when
+# the shim lands in a directory already on PATH, bash, sh, dash and zsh keep
+# running the git they found before until `hash -r` / `rehash`.
+path_hint() {
+	local sh=${SHELL:-} real first rehash
+	sh=${sh##*/}
+	real=$(cd -P -- "$DIR" && pwd -P)
+	if first=$(first_git_on_path) &&
+		[ "$(cd -P -- "${first%/*}" 2>/dev/null && pwd -P)" = "$real" ]; then
+		case $sh in
+		zsh | csh | tcsh) rehash=rehash ;;
+		*) rehash='hash -r' ;;
+		esac
+		echo "$DIR is already first on PATH; in shells that are already open, run:"
+		echo "  $rehash"
+		return 0
+	fi
+	if [ -n "$first" ] && in_path "$real"; then
+		echo "$DIR is on PATH but after $first; move it in front in your shell profile"
+		return 0
+	fi
 	echo "add this line to your shell profile (then open a new shell):"
 	# shellcheck disable=SC2016 # the profile expands $PATH, not us
-	printf '  export PATH="%s:$PATH"\n' "$DIR"
+	case $sh in
+	csh | tcsh) printf '  setenv PATH "%s:$PATH"\n' "$DIR" ;;
+	fish) printf '  set -gx PATH "%s" $PATH\n' "$DIR" ;;
+	*) printf '  export PATH="%s:$PATH"\n' "$DIR" ;;
+	esac
+}
+
+in_path() { # in_path <resolved-dir>: is it a PATH entry?
+	local d IFS=:
+	set -f
+	for d in $PATH; do
+		[ -n "$d" ] || d=.
+		if [ "$(cd -P -- "$d" 2>/dev/null && pwd -P)" = "$1" ]; then
+			set +f
+			return 0
+		fi
+	done
+	set +f
+	return 1
 }
 
 cmd_uninstall() {
@@ -767,6 +811,8 @@ cmd_doctor() {
 	fi
 	if [ -n "$first" ] && is_shim "$first"; then
 		echo "it is the git-salvage shim: yes"
+		echo "  (a shell opened before the install may still run the git it found"
+		echo "   then: open a new shell, or run hash -r / rehash in it)"
 		if [ -n "${GIT_SALVAGE_REAL_GIT:-}" ]; then
 			real=$GIT_SALVAGE_REAL_GIT
 			echo "real git (GIT_SALVAGE_REAL_GIT): $real"

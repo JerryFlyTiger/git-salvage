@@ -48,7 +48,8 @@ git-salvage: set GIT_SALVAGE_SKIP=1 to run it without a snapshot.
 
 ## Install
 
-Requires bash (macOS's `/bin/bash` 3.2 is enough) and git.
+Requires bash on PATH (macOS's `/bin/bash` 3.2 is enough) and git. bash
+only has to be installed: you can type in zsh, csh/tcsh, ksh or fish.
 
 ```console
 $ git clone https://github.com/JerryFlyTiger/git-salvage
@@ -65,9 +66,26 @@ $ git salvage doctor
 git-salvage: /Users/you/.local/share/git-salvage/bin/git-salvage
 first git on PATH: /Users/you/.local/share/git-salvage/bin/git
 it is the git-salvage shim: yes
+  (a shell opened before the install may still run the git it found
+   then: open a new shell, or run hash -r / rehash in it)
 real git: /opt/homebrew/bin/git
 ...
 ```
+
+`install` prints the PATH line for the shell named by `$SHELL`:
+
+| Shell | Profile file (the usual one; not measured) | Line |
+|---|---|---|
+| zsh | `~/.zshrc` | `export PATH="<dir>:$PATH"` |
+| bash | `~/.bashrc` (`~/.bash_profile` on macOS) | `export PATH="<dir>:$PATH"` |
+| csh / tcsh | `~/.cshrc` / `~/.tcshrc` | `setenv PATH "<dir>:$PATH"` |
+| fish | `~/.config/fish/config.fish` | `set -gx PATH "<dir>" $PATH` |
+
+If you install into a directory that is already on your PATH (`--dir
+~/bin`, say), bash, sh and zsh keep running the git they found before until
+you open a new shell or run `hash -r` (zsh: `rehash`); `install` says so.
+Measured shell by shell in `dev/measure-shells.sh`; see "Other shells" in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 `install --dir D` installs somewhere else. `git salvage uninstall` removes the
 three files (`git`, `git-salvage`, `git-salvage-view.html`); snapshots

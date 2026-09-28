@@ -7,6 +7,7 @@
 #   SURVIVED      the suite stayed green: a missing test
 #   ABORTED       no FAIL line and no N/N summary: the suite died
 #   NOT-APPLIED   the substitution matched nothing: the mutation is stale
+#   SYNTAX        the mutated file no longer parses: the mutation is broken
 # usage: dev/mutate.sh [name-substring]   (default: all)
 # shellcheck disable=SC2016 # the $ in every perl expression is perl's, not the shell's
 set -u
@@ -31,6 +32,15 @@ mut() {
 		printf '%-12s %s\n' NOT-APPLIED "$name" >"$d/result"
 		return 0
 	fi
+	# A mutation that breaks the syntax turns nearly every check red, so its
+	# KILLED would prove nothing about the check it names.
+	case $file in
+	*.html | *.js) ;;
+	*) if ! /bin/bash -n "$d/$file" 2>/dev/null; then
+		printf '%-12s %s\n' SYNTAX "$name" >"$d/result"
+		return 0
+	fi ;;
+	esac
 	(
 		timeout 300 /bin/bash "$d/tests/run.sh" >"$d/log" 2>&1
 		fails=$(grep '^FAIL ' "$d/log" | sed 's/^FAIL //')
@@ -174,6 +184,20 @@ mut "install: view template not copied" $S 'view template beside it' \
 	's/\tcopy_into "\$here\/\$VIEW_TEMPLATE" "\$DIR\/\$VIEW_TEMPLATE"\n\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" \|\| die "[^"]*"\n\tchmod 644 "\$DIR\/\$VIEW_TEMPLATE" \|\| die "[^"]*"\n/\tchmod 755 "\$DIR\/git" "\$DIR\/git-salvage" || die "x"\n/'
 mut "uninstall: view template kept" $S 'uninstall: files gone' \
 	's/for f in git git-salvage "\$VIEW_TEMPLATE"; do/for f in git git-salvage; do/'
+mut "install hint: csh gets export" $S 'tcsh gets setenv|csh gets setenv' \
+	's/\tcsh \| tcsh\) printf/\tcsh-x) printf/'
+mut "install hint: fish gets export" $S 'fish gets set -gx' \
+	's/\tfish\) printf/\tfish-x) printf/'
+mut "install hint: zsh rehash becomes hash -r" $S 'already first, zsh: rehash' \
+	's/zsh \| csh \| tcsh\) rehash=rehash/csh | tcsh) rehash=rehash/'
+mut "install hint: already-first never seen" $S 'already first' \
+	's/\[ "\$\(cd -P -- "\$\{first%\/\*\}" 2>\/dev\/null && pwd -P\)" = "\$real" \]/false/'
+mut "install hint: in_path always false" $S 'on PATH after the real git' \
+	's/(in_path\(\) \{[^\n]*\n)/$1\treturn 1\n/'
+mut "install hint: in_path ignores -P" $S 'PATH entry is a symlink' \
+	's/\[ "\$\(cd -P -- "\$d" 2>\/dev\/null && pwd -P\)" = "\$1" \]/[ "\$d" = "\$1" ]/'
+mut "doctor: no stale-shell note" $S 'doctor with the shim: stale-shell note' \
+	's/\t\techo "  \(a shell opened before the install[^\n]*\n[^\n]*\n//'
 
 # --- view (bash side)
 mut "view: status may write the index" $S 'view: repo unchanged' \

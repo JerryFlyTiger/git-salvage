@@ -218,12 +218,54 @@ Snapshots are numbered 1 = newest, in `list` order.
   `salvage.keep` (default 200) and delete older refs.
 - `git salvage install [--dir D]` -- copy the shim to
   `~/.local/share/git-salvage/bin/git` (or D), and `git-salvage` and
-  `git-salvage-view.html` beside it, and print the one `PATH` line to add to the shell profile. One PATH entry
+  `git-salvage-view.html` beside it, and print what to do about PATH (see
+  "Other shells"). One PATH entry
   then reaches both: real git finds `git-salvage` through PATH for
   `git salvage`. Install refuses to overwrite a `git` in D that is not the
   shim. `git salvage uninstall` removes the three files. `git salvage
   doctor` reports: which `git` is first on PATH, whether it is the shim, and
   the real git it resolves to.
+
+### Other shells (measured, `dev/measure-shells.sh`, macOS 26)
+
+The shim and `git-salvage` run under bash through their `#!/usr/bin/env
+bash` line, whatever shell the user types in; that shell only has to find the
+shim first on PATH. Measured with zsh, tcsh, csh, ksh, dash, sh and bash:
+
+- PATH with the shim first when the shell starts: every shell reaches it.
+- PATH set inside the shell (`export` / `setenv`): every shell reaches it,
+  even after it already ran the real git once (setting PATH drops the cached
+  lookup).
+- The shim copied into a directory that is already on PATH, PATH unchanged:
+  bash, sh, dash and zsh keep running the git they looked up before until
+  `hash -r` (zsh: `rehash`); tcsh, csh and ksh pick up the shim.
+  Measured with `<shell> -c` only: interactive shells could not be driven
+  from the oracle (no output through `script` either), so `install` gives
+  every shell its refresh command (`rehash` or `hash -r`, below) -- harmless
+  where it is not needed.
+- An alias (`alias grhh='git reset --hard'`) and a `git()` function that
+  calls `command git` reach the shim. An alias to real git's absolute path
+  does not (see "Coverage limits").
+
+So `install` prints, for the login shell named by `$SHELL`:
+
+- the directory not on PATH: the line to add to the profile --
+  `setenv PATH "D:$PATH"` for csh/tcsh, `set -gx PATH "D" $PATH` for fish
+  (fish syntax not measured: fish was not installed), `export PATH="D:$PATH"`
+  otherwise;
+- the directory already first on PATH: `rehash` (zsh, csh, tcsh) or
+  `hash -r` (others) for shells that are already open, for every shell (see
+  above);
+- the directory on PATH but after the real git: move it in front.
+
+`doctor` runs in its own bash and cannot see the calling shell's cached
+lookups or aliases; with the shim found it says a shell opened before the
+install may need a new shell or `hash -r` / `rehash`.
+
+The only shell requirement is `bash` on PATH for the `env` line. Without it
+the shim fails with `env: bash: No such file or directory`, exit 127, and git
+does not run at all (measured): do not install it where there is no bash
+(e.g. a minimal container).
 
 ## The view page (`git salvage view`)
 
