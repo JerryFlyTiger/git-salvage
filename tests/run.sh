@@ -175,6 +175,42 @@ git salvage _pre reset --hard && git reset -q --hard
 (cd dir && git salvage restore 1 >/dev/null 2>&1)
 check "restore from subdir: whole tree" same tracked "$WORK/saved.t3"
 
+# Names git quotes in its line output: newline, tab, double quote, backslash.
+# Two committed and edited, two untracked; the untracked are deleted by hand.
+QNAMES=("$(printf 'new\nline')" "$(printf 'tab\there')" 'dq"uote' 'back\slash')
+new_repo
+printf 'q0\n' >"${QNAMES[0]}" && printf 'q1\n' >"${QNAMES[1]}"
+git add -A && git commit -qm quoted
+qi=0
+for f in "${QNAMES[@]}"; do
+	printf 'dirty %s\n' "$qi" >>"$f"
+	save "$f" "q$qi"
+	qi=$((qi + 1))
+done
+git salvage _pre reset --hard && git reset -q --hard
+rm -f "${QNAMES[2]}" "${QNAMES[3]}"
+check "quoted names: list counts 4 paths" sh -c 'git salvage list | grep -q "(4 paths)\$"'
+check "quoted names: restore exits 0" git salvage restore 1 >/dev/null 2>&1
+qall() {
+	local i=0 f
+	for f in "${QNAMES[@]}"; do
+		same "$f" "$WORK/saved.q$i" || { echo "  differs: $(printf '%q' "$f")"; return 1; }
+		i=$((i + 1))
+	done
+}
+check "quoted names: all back byte-for-byte" qall
+# restore -- <path> passes the name through ls-files -z / checkout-index -z.
+for qi in 0 1 2 3; do
+	new_repo
+	printf 'dirty\n' >"${QNAMES[$qi]}"
+	printf 'other\n' >>tracked
+	save "${QNAMES[$qi]}" "p$qi"
+	git salvage _pre checkout -f && git checkout -qf && rm -f "${QNAMES[$qi]}"
+	check "quoted names: restore -- name $qi exits 0" git salvage restore 1 -- "${QNAMES[$qi]}" >/dev/null 2>&1
+	check "quoted names: restore -- name $qi back" same "${QNAMES[$qi]}" "$WORK/saved.p$qi"
+	check "quoted names: restore -- name $qi only" test "$(cat tracked)" = one
+done
+
 # ------------------------------------------------------ restore's own guarantees
 
 new_repo

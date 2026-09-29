@@ -26,3 +26,21 @@ shellcheck bin/git-salvage shim/git tests/run.sh
 
 Read the `N/M` line itself; a smaller M means a section aborted.
 After adding a test, prove it can fail (mutate the code, see it red).
+
+`dev/mutate.sh` runs the mutation battery; a full run rewrites the committed
+`dev/mutate-results.txt`. A SURVIVED mutation is one of three things. Name
+which one before acting, because only the first needs a test:
+
+- **Blind spot**: nothing tests that behaviour. Add a test whose oracle is
+  the real git, then see the mutation KILLED.
+- **Redundant guard**: a later layer already stops the same input. Check
+  both that the result is the same and that nothing on the way (a file
+  write, a git call, a ref update) runs on input the guard used to stop.
+  Only then delete the guard or move the mutation to the real defence.
+- **Unobservable / equivalent**: the mutated code behaves the same
+  (for example, git unquotes what it quoted). Measure it, then drop the
+  mutation with a `# Not listed:` note in `dev/mutate.sh` that says what
+  was measured.
+
+TIMEOUT, ABORTED and SYNTAX prove nothing about the named check. Rerun or
+fix the mutation; never count them as KILLED.

@@ -8,7 +8,10 @@
 #   ABORTED       no FAIL line and no N/N summary: the suite died
 #   NOT-APPLIED   the substitution matched nothing: the mutation is stale
 #   SYNTAX        the mutated file no longer parses: the mutation is broken
+#   TIMEOUT       the suite ran past MUT_TIMEOUT: nothing was proven
 # usage: dev/mutate.sh [name-substring]   (default: all)
+# A full run (no filter) also writes dev/mutate-results.txt, which is
+# committed, so a status that changes shows up in the diff.
 # shellcheck disable=SC2016 # the $ in every perl expression is perl's, not the shell's
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -16,6 +19,7 @@ SCR=$(mktemp -d "${TMPDIR:-/tmp}/salvage-mut.XXXXXX")
 trap 'chmod -R u+w "$SCR" 2>/dev/null; rm -rf "$SCR"' EXIT INT TERM
 FILTER=${1:-}
 JOBS=${JOBS:-4}
+MUT_TIMEOUT=${MUT_TIMEOUT:-300}
 I=0
 
 # mut <name> <file> <expected-fail-regex> <perl -0pe expression>
@@ -42,7 +46,14 @@ mut() {
 	fi ;;
 	esac
 	(
-		timeout 300 /bin/bash "$d/tests/run.sh" >"$d/log" 2>&1
+		start=$(date +%s)
+		timeout "$MUT_TIMEOUT" /bin/bash "$d/tests/run.sh" >"$d/log" 2>&1
+		rc=$?
+		printf '%s %s\n' "$(($(date +%s) - start))" "$name" >"$d/time"
+		if [ "$rc" = 124 ]; then
+			printf '%-12s %s  (over %ss)\n' TIMEOUT "$name" "$MUT_TIMEOUT" >"$d/result"
+			exit 0
+		fi
 		fails=$(grep '^FAIL ' "$d/log" | sed 's/^FAIL //')
 		if [ -z "$fails" ]; then
 			if grep -Eq '^tests: ([0-9]+)/\1 passed$' "$d/log"; then
@@ -146,6 +157,15 @@ mut "restore --index allowed on unmerged" $S 'merge --abort: refused' \
 	's/\] && \[ "\$\(trailer "\$ref" Salvage-Index\)" != captured \]; then/] \&\& false; then/'
 mut "restore -- paths ignored" $S 'restore -- dir: other file untouched' \
 	's/if \[ \$\{#paths\[@\]\} -gt 0 \]; then/if false; then/'
+# Not listed: dropping -z on both ls-files and checkout-index. Without -z,
+# checkout-index --stdin unquotes ls-files' "a\nb" lines (measured, git
+# 2.55.0), so it is an equivalent mutation.
+mut "restore -- paths: ls-files without -z" $S 'quoted names: restore -- name [0-3] (exits 0|back)' \
+	's/git ls-files -z -- /git ls-files -- /'
+mut "restore -- paths: newline taken as separator" $S 'quoted names: restore -- name 0 (exits 0|back)' \
+	's/git ls-files -z -- "\$\{paths\[@\]\}" >"\$list"/git ls-files -z -- "\${paths[@]}" | tr "\\n" "\\0" >"\$list"/'
+mut "list: count paths split on NUL" $S 'quoted names: list counts' \
+	's/git diff-tree -r --name-only "\$base" "\$ref:worktree" \|/git diff-tree -r -z --name-only "\$base" "\$ref:worktree" | tr "\\0" "\\n" |/'
 mut "branch restore overwrites existing" $S 'branch restore' \
 	's/git show-ref -q --verify "\$label" && die/git show-ref -q --verify "\$label" \&\& false \&\& die/'
 
@@ -260,5 +280,20 @@ mut "view: data may end without a newline" $S 'base64 without a final newline' \
 	's/if \[ -n "\$\(tail -c 1 "\$raw"\)" \]; then/if false; then/'
 
 wait
+RESULTS=$(cat "$SCR"/m*/result 2>/dev/null | sort)
+# Slowest suite run under JOBS parallel runs: it must stay well under the
+# timeout, or a slower machine turns KILLED into TIMEOUT.
+SLOWEST=$(cat "$SCR"/m*/time 2>/dev/null | sort -n | tail -n 1)
 echo "== mutations ($I)"
-cat "$SCR"/m*/result 2>/dev/null | sort
+printf '%s\n' "$RESULTS"
+if [ -n "$SLOWEST" ]; then
+	echo "slowest: ${SLOWEST%% *}s (${SLOWEST#* }), JOBS=$JOBS, timeout ${MUT_TIMEOUT}s"
+	[ $((${SLOWEST%% *} * 2)) -le "$MUT_TIMEOUT" ] ||
+		echo "WARNING: slowest run is over half the timeout; lower JOBS or raise MUT_TIMEOUT"
+fi
+if [ -z "$FILTER" ]; then
+	{
+		echo "# dev/mutate.sh $(date +%Y-%m-%d), $(git --version), JOBS=$JOBS, slowest ${SLOWEST%% *}s of ${MUT_TIMEOUT}s"
+		printf '%s\n' "$RESULTS"
+	} >"$ROOT/dev/mutate-results.txt"
+fi

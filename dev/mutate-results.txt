@@ -1,0 +1,84 @@
+# dev/mutate.sh 2026-09-29, git version 2.55.0, JOBS=4, slowest 57s of 300s
+KILLED       -- does not end options
+KILLED       -h after an option not seen
+KILLED       -h/--help triggers
+KILLED       add -A becomes add -u (untracked lost)
+KILLED       alias not expanded
+KILLED       branch -M not recorded
+KILLED       branch -r reads refs/heads
+KILLED       branch -t takes an argument
+KILLED       branch restore overwrites existing
+KILLED       clean -e takes no argument
+KILLED       clean -x: no add -f (ignored lost)
+KILLED       clean does not put untracked at risk
+KILLED       doctor: always exit 0
+KILLED       doctor: git's exec-path not skipped
+KILLED       doctor: no stale-shell note
+KILLED       fail closed returns 0
+KILLED       identity not forced
+KILLED       install hint: already-first never seen
+KILLED       install hint: csh gets export
+KILLED       install hint: fish gets export
+KILLED       install hint: in_path always false
+KILLED       install hint: in_path ignores -P
+KILLED       install hint: zsh rehash becomes hash -r
+KILLED       install: foreign git overwritten
+KILLED       install: git-salvage not copied
+KILLED       install: view template not copied
+KILLED       list: count paths split on NUL
+KILLED       no dedupe against newest snapshot
+KILLED       no-index repo: keep the 0-byte temp file
+KILLED       quiet env ignored
+KILLED       ref id: pid before seq
+KILLED       ref id: seq ignores same-second refs
+KILLED       reset --soft triggers
+KILLED       restore -- paths ignored
+KILLED       restore -- paths: ls-files without -z
+KILLED       restore -- paths: newline taken as separator
+KILLED       restore --index allowed on unmerged
+KILLED       restore --index ignored
+KILLED       restore -a runs from the cwd
+KILLED       restore does not save the current state
+KILLED       restore reads the snapshot by ref name
+KILLED       retention off by one
+KILLED       rm -f not recorded
+KILLED       shim: _pre failure ignored
+KILLED       shim: -C read as value-less
+KILLED       shim: GIT_SALVAGE_REAL_GIT ignored
+KILLED       shim: globals not passed to _pre
+KILLED       shim: no unrecognized-option line
+KILLED       shim: REAL_GIT pointing at itself accepted
+KILLED       shim: reset in the fast path
+KILLED       snapshot failure ignored
+KILLED       stash drop <n> ignores n
+KILLED       temp files not cleaned up
+KILLED       uninstall: foreign git removed
+KILLED       uninstall: view template kept
+KILLED       unmerged index treated as failure
+KILLED       untracked-at-risk rule flipped
+KILLED       view js: checkout target always a branch
+KILLED       view js: equal HEAD entries collapse
+KILLED       view js: event ref = second move
+KILLED       view js: finish key ignores branch
+KILLED       view js: finish key ignores id
+KILLED       view js: finish key ignores time
+KILLED       view js: HEAD and branch entries not merged
+KILLED       view js: HEAD-only entry treated as a branch
+KILLED       view js: left behind ignores ancestry
+KILLED       view js: left behind ignores reachable
+KILLED       view js: left behind named at every move
+KILLED       view js: passing lane loses its bottom
+KILLED       view js: rebase finish not merged
+KILLED       view js: snapshots numbered from 0
+KILLED       view js: unknown phase explained
+KILLED       view: -n 00 accepted
+KILLED       view: -n ignored
+KILLED       view: -o <dir> accepted
+KILLED       view: 10-digit -n accepted
+KILLED       view: data may end without a newline
+KILLED       view: data not base64
+KILLED       view: newline kept in the repo name
+KILLED       view: one trailer key only
+KILLED       view: reflog ids not drawn
+KILLED       view: status may write the index
+KILLED       view: unborn HEAD given to log -g

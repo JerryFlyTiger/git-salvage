@@ -46,7 +46,15 @@ trailing empty entry, so a trailing `:` never looks in `.` (same as
 `shim/git`, pre-existing; a leading or middle empty entry is still checked as
 `.`). A second line matching `SHIM_MARKER="..."` in bin/git-salvage would
 make MARKER two lines, and `grep -F` then matches either one (measured):
-wider, not broken. No such line exists. Next: M3, M4.
+wider, not broken. No such line exists.
+
+M3 done. Cold read: no bugs. Declined, all pre-existing: `check ... >/dev/null`
+also hides the FAIL line; `dev/mutate.sh` calls bare `timeout` (no
+`gtimeout` fallback); `dev/mutate.sh`'s own logic has no automated test.
+Its new TIMEOUT / WARNING / results-file logic was exercised by hand instead:
+`MUT_TIMEOUT=5` gives TIMEOUT plus the WARNING and leaves
+`dev/mutate-results.txt` untouched under a filter; with the rc=124 branch
+removed the same run reports ABORTED. Next: M4.
 
 ## M2: large-repo cost
 
@@ -68,10 +76,19 @@ even when the result is "nothing to save".
 
 ## M3: tests and evidence
 
-- [ ] Round-trip file names with an embedded newline, tab and double quote.
-- [ ] `dev/mutate.sh` keeps its results (`dev/mutate-results.txt`, committed).
-- [ ] Check `JOBS` x slowest mutation against the per-mutation timeout.
-- [ ] CLAUDE.md: classify a SURVIVED mutation as blind spot, redundant guard
+- [x] Round-trip file names with an embedded newline, tab and double quote
+      (and backslash): full restore, `restore -- <name>`, `list`'s count.
+      Measured: without `-z`, `checkout-index --stdin` unquotes ls-files'
+      `"a\nb"` lines, so dropping `-z` on both sides is equivalent (noted in
+      `dev/mutate.sh`); dropping it on ls-files only, or splitting on
+      newlines, is KILLED.
+- [x] `dev/mutate.sh` keeps its results (`dev/mutate-results.txt`, committed).
+- [x] Check `JOBS` x slowest mutation against the per-mutation timeout:
+      each run's time is recorded; a timed-out run is TIMEOUT (was ABORTED);
+      the summary prints the slowest and warns past half of `MUT_TIMEOUT`.
+      Solo suite run: 49 s; full battery 83/83 KILLED, slowest run 57 s at
+      JOBS=4 against a 300 s timeout (Apple M4, 10 cores, git 2.55.0).
+- [x] CLAUDE.md: classify a SURVIVED mutation as blind spot, redundant guard
       or unobservable (from Small_Git).
 
 ## M4: small

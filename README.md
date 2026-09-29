@@ -174,8 +174,11 @@ The full design, with the measurements behind each decision, is in
 ```bash
 bash tests/run.sh      # prints "tests: N/M passed"
 shellcheck bin/git-salvage shim/git tests/run.sh dev/*.sh
-dev/mutate.sh          # breaks the code one way at a time; every line should say KILLED
+bash dev/mutate.sh     # breaks the code one way at a time; every line should say KILLED
 ```
+
+A full `dev/mutate.sh` run also rewrites `dev/mutate-results.txt` (committed)
+and prints its slowest suite run against the per-mutation timeout.
 
 The view page's logic (between `BEGIN LOGIC` / `END LOGIC` in
 `bin/git-salvage-view.html`) is tested by `tests/view-test.js`, which
