@@ -13,9 +13,30 @@ set -u
 HERE=$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 HOME=$(mktemp -d)
 export LC_ALL=C GIT_CONFIG_NOSYSTEM=1 HOME XDG_CONFIG_HOME="$HOME/.config"
+# The real git: the first `git` on PATH that is not a git-salvage shim, so an
+# installed shim cannot pass for the real git below.
+# The marker is read from bin/git-salvage, which uses it to recognise a shim.
+MARKER=$(sed -n 's/^SHIM_MARKER="\(.*\)"$/\1/p' "$HERE/bin/git-salvage")
+[ -n "$MARKER" ] || { echo "no SHIM_MARKER in bin/git-salvage" >&2; exit 1; }
+real_git() {
+	local d IFS=:
+	set -f
+	for d in $PATH; do
+		[ -n "$d" ] || d=.
+		[ -f "$d/git" ] && [ -x "$d/git" ] || continue
+		grep -qF -- "$MARKER" "$d/git" 2>/dev/null && continue
+		set +f
+		printf '%s\n' "$d/git"
+		return 0
+	done
+	set +f
+	return 1
+}
+REAL=$(real_git) || { echo "no real git on PATH" >&2; exit 1; }
+REALDIR=${REAL%/*}
+PATH=$REALDIR:$PATH
 git config --global user.name t; git config --global user.email t@t
 git config --global init.defaultBranch main
-REALDIR=$(dirname -- "$(command -v git)")
 SHIMDIR=$HOME/shimbin
 PREDIR=$HOME/prebin          # on PATH ahead of the real git, empty at first
 mkdir -p "$PREDIR"

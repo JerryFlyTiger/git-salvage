@@ -34,25 +34,35 @@ here (bash refills it from the passwd entry): fixed by reading, no test.
 Round 2: tests 356/356, full mutation battery 80/80 KILLED, shellcheck
 clean; its cold read found no bug, 3 wording/consistency items fixed in
 round 3 (DESIGN rehash wording, `/bin/bash -n` in the gate, PLAN wording);
-declined: none. Round 3 is unstaged on top of the index.
+declined: none. Round 3 cold read: no findings. Committed 7c96e77.
 
-M2 numbers are measured (scratchpad script, not yet in `dev/`): see M2.
+## Resume here (2026-09-29)
+
+M2 done: numbers and the no-pre-check decision are in DESIGN.md ("Cost on
+large repos"). `dev/measure-perf.sh` and `dev/measure-shells.sh` now skip an
+installed shim when looking for the real git (both took the first `git` on
+PATH). Cold read: 4 rounds. Declined: `for d in $PATH` drops a
+trailing empty entry, so a trailing `:` never looks in `.` (same as
+`shim/git`, pre-existing; a leading or middle empty entry is still checked as
+`.`). A second line matching `SHIM_MARKER="..."` in bin/git-salvage would
+make MARKER two lines, and `grep -F` then matches either one (measured):
+wider, not broken. No such line exists. Next: M3, M4.
 
 ## M2: large-repo cost
 
 Every destructive command runs a full-tree `git add -A` into a temp index,
 even when the result is "nothing to save".
 
-- [ ] `dev/measure-perf.sh`: snapshot cost at 10k and 100k files.
+- [x] `dev/measure-perf.sh`: snapshot cost at 10k and 100k files.
       Measured 2026-09-28 (Apple M4, git 2.55.0, ms median of 5, real / shim):
       1k: status 26/14, reset clean 11/173, reset dirty 20/178, checkout -- f 8/166;
       10k: 22/27, 39/206, 29/219, 13/152;
       100k: 131/136, 235/583, 252/730, 36/492.
-      Pass-through cost is noise; a destructive command costs ~150 ms more
+      Pass-through cost is noise; a destructive command costs 140-190 ms more
       than real git up to 10k files, and 350-480 ms more at 100k. Decision: no pre-check (it would itself cost a
       `git status`, ~130 ms at 100k, and a wrong answer skips a snapshot).
-- [ ] Record the numbers in DESIGN.md.
-- [ ] Only if too slow: a cheaper "anything uncommitted?" pre-check that
+- [x] Record the numbers in DESIGN.md.
+- [ ] (not done, decided against) Only if too slow: a cheaper "anything uncommitted?" pre-check that
       also sees untracked files, proven equal to the current skip rule by an
       oracle before it replaces anything.
 

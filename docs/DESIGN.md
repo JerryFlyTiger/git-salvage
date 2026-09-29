@@ -121,6 +121,26 @@ cp "$GIT_DIR/index" "$tmp"; T_i=$(GIT_INDEX_FILE=$tmp git write-tree)  # may fai
 - Bare repository, or not inside a repository: no snapshot; the command runs
   and git reports whatever it reports.
 
+### Cost on large repos (measured, `dev/measure-perf.sh`)
+
+The skip rule needs the full-tree `add -A` + `write-tree` above, so every
+destructive command pays for it even when there is nothing to save.
+Measured 2026-09-28, Apple M4, git 2.55.0; ms, median of 5, real git / shim:
+
+| files | status  | reset --hard, clean | reset --hard, dirty | checkout -- f |
+|------:|--------:|--------------------:|--------------------:|--------------:|
+| 1k    | 26 / 14 | 11 / 173            | 20 / 178            | 8 / 166       |
+| 10k   | 22 / 27 | 39 / 206            | 29 / 219            | 13 / 152      |
+| 100k  | 131 / 136 | 235 / 583         | 252 / 730           | 36 / 492      |
+
+- Pass-through (`status`): no measurable cost.
+- Destructive: 140-190 ms more than real git up to 10k files, 350-480 ms more
+  at 100k.
+- No cheaper "anything uncommitted?" pre-check. It would itself cost a
+  `git status` (~130 ms at 100k), and a wrong "no" skips a snapshot, which
+  loses work. Revisit only if the cost becomes a problem, and only with an
+  oracle proving the pre-check equals the current skip rule.
+
 ### Global options in the shim (measured, `dev/measure-globals.sh`)
 
 - `-C`, `-c` take the next word. `--git-dir`, `--work-tree`, `--namespace`,
@@ -160,8 +180,8 @@ snapshot. An argument after `--` is never read as an option.
 Plain `-m`/`-c` refuse an existing `<new>` (exit 128, measured), so they
 record nothing without `-f`.
 
-Over-triggering is cheap (the skip rule makes a clean tree cost one `add -A`);
-under-triggering loses data. When in doubt, trigger.
+Over-triggering is cheap (the skip rule makes a clean tree cost one `add -A`;
+measured under "Cost on large repos"); under-triggering loses data. When in doubt, trigger.
 
 ## Failure policy: fail closed
 
