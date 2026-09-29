@@ -1,4 +1,4 @@
-# dev/mutate.sh 2026-09-29, git version 2.55.0, JOBS=4, slowest 57s of 300s
+# dev/mutate.sh 2026-09-29, git version 2.55.0, JOBS=4, slowest 46s of 300s
 KILLED       -- does not end options
 KILLED       -h after an option not seen
 KILLED       -h/--help triggers
@@ -54,6 +54,16 @@ KILLED       stash drop <n> ignores n
 KILLED       temp files not cleaned up
 KILLED       uninstall: foreign git removed
 KILLED       uninstall: view template kept
+KILLED       unknown: always plural
+KILLED       unknown: limit 2 for short input
+KILLED       unknown: no adjacent swap
+KILLED       unknown: no dedupe
+KILLED       unknown: no length filter
+KILLED       unknown: no prefix match
+KILLED       unknown: no usage without a suggestion
+KILLED       unknown: over the limit kept
+KILLED       unknown: prefix of any length
+KILLED       unknown: ties dropped
 KILLED       unmerged index treated as failure
 KILLED       untracked-at-risk rule flipped
 KILLED       view js: checkout target always a branch

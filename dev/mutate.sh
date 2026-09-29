@@ -279,6 +279,28 @@ mut "view: newline kept in the repo name" $S 'newline in the repo name keeps' \
 mut "view: data may end without a newline" $S 'base64 without a final newline' \
 	's/if \[ -n "\$\(tail -c 1 "\$raw"\)" \]; then/if false; then/'
 
+# --- unknown subcommand
+mut "unknown: no adjacent swap" $S 'swapped letters' \
+	's/v=\$\(\(pp\[j - 2\] \+ 1\)\)/:/'
+mut "unknown: limit 2 for short input" $S 'prefix, no far match' \
+	's/\[ \$\{#typo\} -le 4 \] && max=1/:/'
+mut "unknown: over the limit kept" $S 'prefix, no far match' \
+	's/if \[ "\$d" -gt "\$max" \]; then\n\t\t\tcontinue\n\t\telif/if/'
+mut "unknown: ties dropped" $S 'two at the same distance' \
+	's/\t\telif \[ "\$d" = "\$best" \]; then\n\t\t\tnear="\$near \$cmd"\n//'
+mut "unknown: no prefix match" $S 'prefix, no far match' \
+	's/\[ \$\{#typo\} -ge 3 \] && pre="\$pre \$cmd"/:/'
+mut "unknown: prefix of any length" $S '2-letter prefix' \
+	's/\[ \$\{#typo\} -ge 3 \] && pre=/pre=/'
+mut "unknown: no dedupe" $S 'listed once' \
+	's/\t\tcase " \$out " in \*" \$cmd "\*\) continue ;; esac\n//'
+mut "unknown: always plural" $S 'one suggestion' \
+	's/if \[ "\$n" = 1 \]; then/if false; then/'
+mut "unknown: no usage without a suggestion" $S 'no suggestion prints usage' \
+	's/suggest "\$sub" >&2 \|\| usage >&2/suggest "\$sub" >\&2/'
+mut "unknown: no length filter" $S 'long argument' \
+	's/\t\t\[ "\$d" -le "\$max" \] && \[ "\$d" -ge \$\(\(-max\)\) \] \|\| continue\n//'
+
 wait
 RESULTS=$(cat "$SCR"/m*/result 2>/dev/null | sort)
 # Slowest suite run under JOBS parallel runs: it must stay well under the

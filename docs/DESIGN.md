@@ -183,6 +183,27 @@ record nothing without `-f`.
 Over-triggering is cheap (the skip rule makes a clean tree cost one `add -A`;
 measured under "Cost on large repos"); under-triggering loses data. When in doubt, trigger.
 
+### Why a plain merge / rebase start takes no snapshot (measured, `dev/measure-merge-rebase.sh`, git 2.55.0)
+
+git-salvage protects uncommitted work only. The commits that a merge or
+rebase moves away from stay in the reflog (and the view page shows them). Starting one
+either refuses to touch uncommitted work or leaves it in place:
+
+| case | exit | uncommitted work |
+|---|---|---|
+| merge, dirty file the merge changes (also fast-forward) | 2 (ff: 1), "Your local changes ... would be overwritten" | kept |
+| merge, staged change to a file the merge does not touch | 2, same message | kept |
+| merge, untracked file the merge would create | 2, "untracked working tree files would be overwritten" | kept |
+| merge, dirty file the merge does not touch | 0 | kept |
+| merge that conflicts, dirty file it does not touch | 1 | kept |
+| rebase, unstaged or staged change, even to a file it does not touch | 1, "cannot rebase: ..." | kept |
+| rebase that replays a commit, untracked file the new base would create | 1, "untracked working tree files would be overwritten by checkout" (the checkout of the new base) | kept |
+| `rebase --autostash`, the stash does not apply cleanly | 0 | in `stash@{0}` (`git stash drop`/`pop` are caught) |
+
+The step that can throw work away is the way out, `--abort` and `--skip`,
+which the trigger table above catches. `pull`, `cherry-pick`, `revert` and `am` are
+handled the same way; they are not measured here.
+
 ## Failure policy: fail closed
 
 If a snapshot that *should* be taken fails, the destructive command does
@@ -233,6 +254,11 @@ Snapshots are numbered 1 = newest, in `list` order.
   - stash: `git stash store -m <original message> <commit>`.
   - The snapshot is kept after a restore.
 - `git salvage snapshot [-m <msg>]` -- take one by hand.
+- An unknown subcommand exits 1 with `unknown subcommand: <x>` and, like
+  git (measured, `dev/measure-unknown-command.sh`), a "most similar" list: the subcommands at the smallest edit distance
+  (Levenshtein plus adjacent swaps; at most 1 for input of 4 characters or
+  fewer, else 2), plus those the input is the start of (3 characters or
+  more). With none, the usage text instead.
 - `git salvage drop N`, `git salvage prune [--keep K] [--older-than DAYS]`.
 - Automatic retention: after each new snapshot, keep the newest
   `salvage.keep` (default 200) and delete older refs.

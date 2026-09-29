@@ -479,6 +479,52 @@ git salvage drop 1 >/dev/null
 check "drop" test "$(nrefs)" = 0
 check "prune needs an option" sh -c '! git salvage prune >/dev/null 2>&1'
 
+# ---------------------------------------------------------- unknown subcommand
+
+# unknown <typo> <expected stderr>: exit 1, nothing on stdout, exact stderr.
+unknown() {
+	local out err rc
+	out=$(git salvage "$1" 2>"$WORK/unknown.err")
+	rc=$?
+	err=$(cat "$WORK/unknown.err")
+	test "$rc" = 1 && test -z "$out" && test "$err" = "$2"
+}
+tab=$(printf '\t')
+check "unknown: one suggestion" unknown resotre "git-salvage: unknown subcommand: resotre
+
+The most similar subcommand is
+${tab}restore"
+check "unknown: two at the same distance" unknown ninstall "git-salvage: unknown subcommand: ninstall
+
+The most similar subcommands are
+${tab}install
+${tab}uninstall"
+# Only a swap of two adjacent letters makes this distance 1.
+check "unknown: swapped letters" unknown lsit "git-salvage: unknown subcommand: lsit
+
+The most similar subcommand is
+${tab}list"
+# restore is reached only as a prefix; list is distance 2, over the limit
+# for 4 characters.
+check "unknown: prefix, no far match" unknown rest "git-salvage: unknown subcommand: rest
+
+The most similar subcommand is
+${tab}restore"
+check "unknown: near and prefix listed once" unknown prun "git-salvage: unknown subcommand: prun
+
+The most similar subcommand is
+${tab}prune"
+check "unknown: 2-letter prefix is no match" unknown sn "git-salvage: unknown subcommand: sn
+$(git salvage help)"
+# Without the length filter, 2000 characters take 11 s (measured, Apple M4).
+long_typo() {
+	bounded 3 git salvage "$(printf '%2000s' '' | tr ' ' a)" >/dev/null 2>&1
+	test $? = 1
+}
+check "unknown: long argument answers fast" long_typo
+check "unknown: no suggestion prints usage" unknown xyzzy "git-salvage: unknown subcommand: xyzzy
+$(git salvage help)"
+
 # ---------------------------------------------------------- view
 
 VIEW_TPL="$ROOT/bin/git-salvage-view.html"
@@ -840,5 +886,6 @@ $jsout
 EOF
 check "view js: ran to the end (done $jsn)" test "$(printf '%s\n' "$jsout" | tail -n 1)" = "done $jsn"
 
+for name in ${FAILED[@]+"${FAILED[@]}"}; do echo "failed: $name"; done
 echo "tests: $PASS/$TOTAL passed"
 [ "$PASS" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]

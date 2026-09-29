@@ -945,6 +945,69 @@ cmd_view() {
 
 # ----------------------------------------------------------------------- main
 
+# Optimal string alignment distance: Levenshtein plus swapping two adjacent
+# characters, each costing 1.
+edit_distance() {
+	local a=$1 b=$2 i j cost v
+	local -a pp p c
+	for ((j = 0; j <= ${#b}; j++)); do p[j]=$j; done
+	for ((i = 1; i <= ${#a}; i++)); do
+		c=([0]=$i)
+		for ((j = 1; j <= ${#b}; j++)); do
+			cost=1
+			[ "${a:i-1:1}" = "${b:j-1:1}" ] && cost=0
+			v=$((p[j] + 1))
+			[ $((c[j - 1] + 1)) -lt "$v" ] && v=$((c[j - 1] + 1))
+			[ $((p[j - 1] + cost)) -lt "$v" ] && v=$((p[j - 1] + cost))
+			if [ "$i" -gt 1 ] && [ "$j" -gt 1 ] &&
+				[ "${a:i-1:1}" = "${b:j-2:1}" ] && [ "${a:i-2:1}" = "${b:j-1:1}" ] &&
+				[ $((pp[j - 2] + 1)) -lt "$v" ]; then
+				v=$((pp[j - 2] + 1))
+			fi
+			c[j]=$v
+		done
+		pp=("${p[@]}")
+		p=("${c[@]}")
+	done
+	echo "${p[${#b}]}"
+}
+
+# Prints git's "most similar" block for an unknown subcommand: the
+# subcommands at the smallest edit distance (at most 1 for 4 characters or
+# fewer, else 2), plus those it is the start of (3 characters or more).
+# Returns 1 when there is none.
+suggest() {
+	local typo=$1 cmd d max=2 best near='' pre='' out='' n=0
+	[ ${#typo} -le 4 ] && max=1
+	best=$((max + 1))
+	for cmd in list show restore snapshot drop prune view install uninstall doctor help; do
+		case $cmd in "$typo"?*) [ ${#typo} -ge 3 ] && pre="$pre $cmd" ;; esac
+		# A length gap over max is already a distance over max.
+		d=$((${#cmd} - ${#typo}))
+		[ "$d" -le "$max" ] && [ "$d" -ge $((-max)) ] || continue
+		d=$(edit_distance "$typo" "$cmd")
+		if [ "$d" -gt "$max" ]; then
+			continue
+		elif [ "$d" -lt "$best" ]; then
+			best=$d near=" $cmd"
+		elif [ "$d" = "$best" ]; then
+			near="$near $cmd"
+		fi
+	done
+	for cmd in $near $pre; do
+		case " $out " in *" $cmd "*) continue ;; esac
+		out="$out $cmd"
+		n=$((n + 1))
+	done
+	[ "$n" -gt 0 ] || return 1
+	if [ "$n" = 1 ]; then
+		printf '\nThe most similar subcommand is\n'
+	else
+		printf '\nThe most similar subcommands are\n'
+	fi
+	for cmd in $out; do printf '\t%s\n' "$cmd"; done
+}
+
 main() {
 	SUB=${1:-}
 	local sub=$SUB
@@ -971,7 +1034,7 @@ main() {
 		;;
 	*)
 		err "unknown subcommand: $sub"
-		usage >&2
+		suggest "$sub" >&2 || usage >&2
 		return 1
 		;;
 	esac

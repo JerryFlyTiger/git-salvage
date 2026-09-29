@@ -105,6 +105,10 @@ already taken stay in each repo under `refs/salvage/`.
 | `branch -d/-D` | always (the branch tips) |
 | `branch -M/-C`, or `-m/-c` with `-f` | when the target branch exists |
 
+Starting a merge or rebase takes no snapshot: git either refuses to start
+over uncommitted changes or leaves them in place (measured; see
+`docs/DESIGN.md`). Only the way out, `--abort` or `--skip`, can throw them away.
+
 One level of alias is followed (`alias.nuke = reset --hard` is caught).
 Nothing is saved when there is nothing uncommitted, or when the state is the
 same as the newest snapshot.

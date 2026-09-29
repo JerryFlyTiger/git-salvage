@@ -55,6 +55,25 @@ Its new TIMEOUT / WARNING / results-file logic was exercised by hand instead:
 `MUT_TIMEOUT=5` gives TIMEOUT plus the WARNING and leaves
 `dev/mutate-results.txt` untouched under a filter; with the rc=124 branch
 removed the same run reports ABORTED. Next: M4.
+The M3 paragraph above was committed before its cold read; it was read
+2026-09-29 (no findings) before the push. Side finding from that read:
+`tests/run.sh` filled `FAILED` but never printed it; M4 prints each name as
+`failed: <name>` before the summary (not `FAIL `, which `dev/mutate.sh`
+counts).
+
+M4 done: both items, tests 379/379, the 10 new `unknown:`
+mutations all KILLED; full battery 93/93 KILLED. Cold read round 1: R3 in
+`dev/measure-merge-rebase.sh` fast-forwarded instead of replaying a commit
+(fixed: `up` now has a commit; same result, git refuses at the checkout of
+the new base); the "most similar" format had no oracle (added
+`dev/measure-unknown-command.sh`); DESIGN wording. Declined: the
+"long argument answers fast" check only bites where `timeout`/`gtimeout`
+exists (`bounded` runs unbounded otherwise; pre-existing helper, and
+without it the check passes slowly rather than failing wrongly).
+Round 2 (tail): the R3 row said "same message", which reads as the row
+above ("cannot rebase"); now quotes git's own message. Round 3 read that
+fix and this paragraph before the commit; its result is in the commit
+message. PLAN.md has no milestone after M4.
 
 ## M2: large-repo cost
 
@@ -93,6 +112,11 @@ even when the result is "nothing to save".
 
 ## M4: small
 
-- [ ] Typo suggestion for an unknown `git salvage <sub>`.
-- [ ] DESIGN.md: why a plain `merge` / `rebase` start takes no snapshot
+- [x] Typo suggestion for an unknown `git salvage <sub>`. Format copied from
+      git's own "The most similar command is" (measured). Rule in DESIGN.md
+      ("User commands").
+- [x] DESIGN.md: why a plain `merge` / `rebase` start takes no snapshot
       (only uncommitted work is protected; `--abort` / `--skip` are caught).
+      Measured by `dev/measure-merge-rebase.sh`: every start either refuses
+      or leaves the work in place; `rebase --autostash` that conflicts keeps
+      it in `stash@{0}`.
