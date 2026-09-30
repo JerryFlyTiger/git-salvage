@@ -503,6 +503,15 @@ Known limits of the page (reviewed, not fixed):
   real git. It still works; `_pre` just runs twice, and the same-state skip
   stops a second ref. Detecting it would mean reading the real git binary on
   every call.
+- A trailing `:` in PATH is not searched as `.` by the shim: bash word
+  splitting drops a trailing empty entry (measured, bash 3.2), while a
+  leading or middle empty entry is searched as `.`. Tests pin both the middle
+  entry being searched and the trailing one not. It matters only when the
+  sole other git is in the current directory: the shim then says it cannot
+  find the real git and exits 1, where the shell would have run `./git`.
+  Every `for d in $PATH` loop in the project behaves the same (`in_path` and
+  `first_git_on_path` in `bin/git-salvage`, `dev/measure-perf.sh`,
+  `dev/measure-shells.sh`); only the shim's is tested.
 - Nested repositories inside untracked directories are recorded as gitlinks;
   their contents are not saved.
 - Snapshots keep large untracked files alive until pruned.
@@ -515,6 +524,27 @@ macOS plus `shellcheck`. Oracle = the real git: every destructive case asserts
 byte-for-byte; every transparency case runs the same command through the shim
 and through real git in twin repos and compares stdout, stderr (minus the one
 salvage line) and exit code.
+
+`dev/mutate.sh` runs every mutation against the suite, `JOBS` at a time, each
+under `MUT_TIMEOUT` (default 300 s); a full run writes
+`dev/mutate-results.txt`, whose first line records the date, git version,
+`JOBS` and the slowest run. Measured 2026-09-29 to 09-30 (Apple M4, 10
+cores, git 2.55.0): the suite alone takes 49 s; the slowest mutation run was
+46-57 s at `JOBS=4` across the committed full runs, well under the timeout.
+The summary warns when the slowest run passes half of `MUT_TIMEOUT`.
+
+Known limits of the test tooling (reviewed, not fixed):
+- `check ... >/dev/null` in `tests/run.sh` also hides that check's FAIL
+  line; the `failed: <name>` list before the summary still names it. But
+  `dev/mutate.sh` reads only `FAIL ` lines, so a mutation that turns only
+  such a check red is reported ABORTED, not KILLED.
+- `bounded` in `tests/run.sh` needs `timeout` or `gtimeout`; without either
+  it runs the command unbounded. The "long argument answers fast" check then
+  passes slowly instead of catching a hang, and the shim-execs-itself check
+  and the view js runs would hang the suite instead of failing.
+- `dev/mutate.sh` calls `timeout` with no `gtimeout` fallback, and its own
+  logic has no automated test. Its TIMEOUT / WARNING / results-file handling
+  was checked by hand (`MUT_TIMEOUT=5`).
 
 Known timing quirk (macOS, not fixed): the first exec of a freshly copied
 script costs 0.35-0.7 s (the OS scans it). One run stalled ~2 min in

@@ -183,12 +183,19 @@ mut "shim: reset in the fast path" $G 'shim: reset --hard saved' \
 	's/\nstatus \| log \|/\nreset | status | log |/'
 mut "shim: REAL_GIT pointing at itself accepted" $G 'GIT_SALVAGE_REAL_GIT' \
 	's/ &&\n\t\t! \[ "\$GIT_SALVAGE_REAL_GIT" -ef "\$self" \]; then/; then/'
+mut "shim: empty PATH entry skipped" $G 'empty PATH entry searched as \.' \
+	's/\t\t\[ -n "\$d" \] \|\| d=\.\n//'
+mut "shim: trailing PATH entry searched" $G 'trailing : in PATH not searched' \
+	's/for d in \$PATH; do/for d in \$PATH:; do/'
 mut "shim: GIT_SALVAGE_REAL_GIT ignored" $G 'GIT_SALVAGE_REAL_GIT is used' \
 	's/if \[ -n "\$\{GIT_SALVAGE_REAL_GIT:-\}" \]/if false/'
 mut "shim: no unrecognized-option line" $G 'unrecognized option' \
 	's/\t\tprintf .%s\\n. "git-salvage: unrecognized option[^\n]*\n//'
 
 # --- install / doctor
+# Not listed: `${SHELL:-}` in path_hint becoming `$SHELL`. With SHELL
+# unset, bash fills it from the passwd entry before the script runs
+# (measured, /bin/bash 3.2, `env -u SHELL`), so `set -u` never sees it unset.
 mut "install: git-salvage not copied" $S 'git-salvage beside it' \
 	's/\tcopy_into "\$self" "\$DIR\/git-salvage"\n//'
 mut "install: foreign git overwritten" $S 'install refuses a foreign git' \

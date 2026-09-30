@@ -1,4 +1,4 @@
-# dev/mutate.sh 2026-09-29, git version 2.55.0, JOBS=4, slowest 46s of 300s
+# dev/mutate.sh 2026-09-30, git version 2.55.0, JOBS=4, slowest 49s of 300s
 KILLED       -- does not end options
 KILLED       -h after an option not seen
 KILLED       -h/--help triggers
@@ -44,11 +44,13 @@ KILLED       retention off by one
 KILLED       rm -f not recorded
 KILLED       shim: _pre failure ignored
 KILLED       shim: -C read as value-less
+KILLED       shim: empty PATH entry skipped
 KILLED       shim: GIT_SALVAGE_REAL_GIT ignored
 KILLED       shim: globals not passed to _pre
 KILLED       shim: no unrecognized-option line
 KILLED       shim: REAL_GIT pointing at itself accepted
 KILLED       shim: reset in the fast path
+KILLED       shim: trailing PATH entry searched
 KILLED       snapshot failure ignored
 KILLED       stash drop <n> ignores n
 KILLED       temp files not cleaned up

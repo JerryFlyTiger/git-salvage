@@ -9,7 +9,7 @@ REAL_GIT=$(command -v git) || { echo "tests: no git on PATH"; exit 1; }
 ORIG_PATH=$PATH
 export PATH="$ROOT/bin:$PATH"
 export LC_ALL=C GIT_CONFIG_NOSYSTEM=1 GIT_EDITOR=true GIT_PAGER=cat PAGER=cat
-unset GIT_SALVAGE_SKIP GIT_SALVAGE_QUIET GIT_SALVAGE_ACTIVE GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+unset GIT_SALVAGE_SKIP GIT_SALVAGE_QUIET GIT_SALVAGE_ACTIVE GIT_SALVAGE_REAL_GIT GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/salvage-test.XXXXXX")
 export HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config"
@@ -829,11 +829,18 @@ check "shim: GIT_SALVAGE_REAL_GIT is used" \
 # Accepting it would exec the shim forever: bounded, so that shows as a FAIL.
 check "shim: GIT_SALVAGE_REAL_GIT pointing at the shim is ignored" \
 	test "$(GIT_SALVAGE_REAL_GIT="$SHIMDIR/git" bounded 10 env PATH="$SPATH" "$SHIMDIR/git" --version 2>&1)" = "$real_version"
+# An empty PATH entry is `.`; bash word splitting drops a trailing one, so a
+# trailing `:` is not searched (DESIGN.md "Coverage limits").
+check "shim: empty PATH entry searched as ." \
+	test "$(cd "$WORK/fakegit" && PATH="$SHIMDIR::$SPATH" "$SHIMDIR/git" --version 2>&1)" = "fake git --version"
 mkdir -p "$WORK/nogit" && ln -s "$(command -v bash)" "$WORK/nogit/bash"
 err=$(PATH="$SHIMDIR:$WORK/nogit" "$SHIMDIR/git" status 2>&1)
 rc=$?
 check "shim: no real git: exit 1" test "$rc" = 1
 check "shim: no real git: message" test "$err" = "git-salvage: cannot find the real git on PATH"
+# The fake git in . is the only other git; a searched trailing entry finds it.
+check "shim: trailing : in PATH not searched" \
+	test "$(cd "$WORK/fakegit" && PATH="$WORK/nogit:" "$SHIMDIR/git" --version 2>&1)" = "git-salvage: cannot find the real git on PATH"
 
 # doctor
 out=$(sgit salvage doctor 2>&1)
@@ -886,6 +893,7 @@ $jsout
 EOF
 check "view js: ran to the end (done $jsn)" test "$(printf '%s\n' "$jsout" | tail -n 1)" = "done $jsn"
 
+# Not `FAIL `: dev/mutate.sh reads `^FAIL ` lines as the failed checks.
 for name in ${FAILED[@]+"${FAILED[@]}"}; do echo "failed: $name"; done
 echo "tests: $PASS/$TOTAL passed"
 [ "$PASS" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]
