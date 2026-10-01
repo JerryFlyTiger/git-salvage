@@ -23,6 +23,9 @@ trap cleanup EXIT
 PASS=0
 TOTAL=0
 FAILED=()
+# FAIL lines go to fd 3, the suite's own stdout, so that `check ... >/dev/null`
+# hides only the command's output (dev/mutate.sh reads the FAIL lines).
+exec 3>&1
 check() { # check <name> <command...>
 	local name=$1
 	shift
@@ -31,9 +34,11 @@ check() { # check <name> <command...>
 		PASS=$((PASS + 1))
 	else
 		FAILED+=("$name")
-		echo "FAIL $name"
+		echo "FAIL $name" >&3
 	fi
 }
+# skip <name> <why>: a check that cannot run here; M is smaller by one.
+skip() { echo "SKIP $1 ($2)" >&3; }
 
 N=0
 new_repo() { # -> cd into a fresh repo with one commit; sets R
@@ -48,7 +53,8 @@ new_repo() { # -> cd into a fresh repo with one commit; sets R
 }
 nrefs() { git for-each-ref refs/salvage/ | wc -l | tr -d ' '; }
 same() { cmp -s "$1" "$2"; }
-# bounded <secs> <cmd...>: run it under timeout(1) when there is one.
+# bounded <secs> <cmd...>: run it under timeout(1), else under perl's alarm,
+# which survives the exec and kills the command (SIGALRM) when it runs over.
 bounded() {
 	local t=$1
 	shift
@@ -57,7 +63,7 @@ bounded() {
 	elif command -v gtimeout >/dev/null 2>&1; then
 		gtimeout "$t" "$@"
 	else
-		"$@"
+		perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$t" "$@"
 	fi
 }
 # contains <needle> <haystack>
@@ -210,6 +216,226 @@ for qi in 0 1 2 3; do
 	check "quoted names: restore -- name $qi back" same "${QNAMES[$qi]}" "$WORK/saved.p$qi"
 	check "quoted names: restore -- name $qi only" test "$(cat tracked)" = one
 done
+
+# ------------------------------------------------------ worktree remove
+
+# wt_repo: new_repo that ignores *.log, plus a linked worktree $W on wb.
+wt_repo() {
+	new_repo
+	printf '*.log\n' >.gitignore
+	git add .gitignore && git commit -qm ignore
+	W="$WORK/w$N"
+	git worktree add -q -b wb "$W"
+}
+newest_ref() { git for-each-ref --sort=-refname --count=1 --format='%(refname)' refs/salvage/; }
+WT_FILES="tracked other untracked x.log"
+wt_all_back() {
+	local f
+	for f in $WT_FILES; do
+		same "$W/$f" "$WORK/saved.wt_$f" || { echo "  differs: $f"; return 1; }
+	done
+}
+
+wt_repo
+printf 'mod\n' >>"$W/tracked"
+printf 'staged\n' >>"$W/other" && git -C "$W" add other
+printf 'new\n' >"$W/untracked"
+printf 'log\n' >"$W/x.log"
+for f in $WT_FILES; do save "$W/$f" "wt_$f"; done
+check "worktree remove -f: _pre exits 0" git salvage _pre worktree remove -f "$W"
+check "worktree remove -f: one snapshot" test "$(nrefs)" = 1
+check "worktree remove -f: Salvage-Head is the worktree's branch" \
+	test "$(git log -1 --format='%(trailers:key=Salvage-Head,valueonly)' "$(newest_ref)")" = refs/heads/wb
+git worktree remove -f "$W"
+check "worktree remove -f: worktree gone" test ! -e "$W"
+git worktree add -q "$W" wb
+check "worktree remove -f: restore --index in the re-added worktree" \
+	sh -c 'cd "$1" && git salvage restore 1 --index >/dev/null 2>&1' _ "$W"
+check "worktree remove -f: everything back, ignored file too" wt_all_back
+check "worktree remove -f: index back" test "$(git -C "$W" diff --cached --name-only)" = other
+
+# Plain remove deletes ignored files (DESIGN.md), so it is caught too.
+wt_repo
+printf 'log\n' >"$W/x.log"
+check "worktree remove, ignored file only: snapshot" pre_count 1 worktree remove "$W"
+check "worktree remove, ignored file only: file saved" git cat-file -e "$(newest_ref):worktree/x.log"
+wt_no_tmp() {
+	local f
+	for f in "$R/.git/salvage-tmp."* "$R/.git/worktrees/w$N/salvage-tmp."*; do
+		[ -e "$f" ] && return 1
+	done
+	return 0
+}
+check "worktree remove: no temp files left" wt_no_tmp
+git worktree remove "$W"
+check "worktree remove, ignored file only: git deleted it" test ! -e "$W"
+wt_repo
+check "worktree remove, clean worktree: no snapshot" pre_count 0 worktree remove "$W"
+
+# How the argument names the worktree (dev/measure-worktree-remove.sh).
+wt_repo
+printf 'by name\n' >>"$W/tracked"
+check "worktree remove: by last path component" pre_count 1 worktree remove -f "w$N"
+check "worktree remove: by last path component: that worktree saved" \
+	test "$(git show "$(newest_ref):worktree/tracked" | tail -n 1)" = 'by name'
+# No <wt>: git prints its usage. Run from the worktree's top, where ./ would
+# be the worktree itself.
+wt_repo
+printf 'noarg\n' >>"$W/tracked"
+check "worktree remove with no path: no snapshot" \
+	sh -c 'cd "$1" && out=$(git salvage _pre worktree remove -f 2>&1) && test -z "$out" && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 0' _ "$W"
+check "worktree remove with an empty path: no snapshot" \
+	sh -c 'cd "$1" && out=$(git salvage _pre worktree remove -f "" 2>&1) && test -z "$out" && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 0' _ "$W"
+# A second, stale worktree (directory gone) is compared by path too: no cd
+# error may reach stderr.
+wt_repo
+git worktree add -q -b stale "$WORK/stale$N" && rm -rf "$WORK/stale$N"
+printf 'rel2\n' >>"$W/tracked"
+out=$(cd dir && git salvage _pre worktree remove -f "../../w$N" 2>&1)
+check "worktree remove with a stale worktree: only the saved line" \
+	test "$out" = 'git-salvage: saved snapshot 1 (to undo the removal: add the worktree again, then run git salvage restore 1 in it)'
+# Linux: git refuses (core.ignorecase is false), the snapshot costs nothing.
+wt_repo
+git worktree add -q -b cs "$WORK/Cs$N"
+printf 'case\n' >>"$WORK/Cs$N/tracked"
+check "worktree remove: last component in other letter case" pre_count 1 worktree remove -f "cS$N"
+# ../cP is not the end of any worktree path: only the path compare can
+# match. On a case-sensitive file system the mkdir makes a real cP beside
+# Cp, which matches once both sides are lowercased (one harmless extra
+# snapshot; git would refuse); elsewhere it is the same directory.
+wt_repo
+git worktree add -q -b cp "$WORK/Cp$N"
+mkdir -p "$WORK/cP$N"
+printf 'case path\n' >>"$WORK/Cp$N/tracked"
+check "worktree remove: relative path in other letter case" pre_count 1 worktree remove -f "../cP$N"
+# Entered in another letter case, pwd -P keeps it (measured, N8). Only a
+# case-insensitive file system can enter it that way.
+wt_repo
+printf 'case cwd\n' >>"$W/tracked"
+if [ -d "$WORK/W$N" ]; then
+	check "worktree remove: . from inside, entered in other letter case" \
+		sh -c 'cd "$1" && git salvage _pre worktree remove -f . && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 1' _ "$WORK/W$N"
+else
+	skip "worktree remove: . from inside, entered in other letter case" "case-sensitive file system"
+fi
+wt_repo
+printf 'rel\n' >>"$W/tracked"
+check "worktree remove: relative path through .." \
+	sh -c 'cd dir && git salvage _pre worktree remove -f "../../w$1" && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 1' _ "$N"
+wt_repo
+printf 'here\n' >>"$W/tracked"
+check "worktree remove: . from inside the worktree" \
+	sh -c 'cd "$1" && git salvage _pre worktree remove -f . && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 1' _ "$W"
+wt_repo
+printf 'slash\n' >>"$W/tracked"
+check "worktree remove: absolute path with trailing slash" pre_count 1 worktree remove -f "$W/"
+# lnk is worktree B's last component and, as a path, worktree A: git takes
+# B (measured), git-salvage saves both.
+wt_repo
+git worktree add -q -b xb "$WORK/x$N/real" && git worktree add -q -b yb "$WORK/y$N/lnk"
+printf 'A\n' >>"$WORK/x$N/real/tracked" && printf 'B\n' >>"$WORK/y$N/lnk/tracked"
+ln -s "$WORK/x$N/real" lnk
+out=$(git salvage _pre worktree remove -f lnk 2>&1)
+check "worktree remove: name and path disagree: both saved" test "$(nrefs)" = 2
+check "worktree remove: name and path disagree: saved line" \
+	test "$out" = 'git-salvage: saved snapshots 1-2 (see: git salvage list)'
+# With CDPATH=., cd prints the directory it found, which a path match
+# reading cd's output would take as part of the path.
+wt_repo
+printf 'cdpath\n' >>"$W/tracked"
+ln -s "$W" cur
+check "worktree remove: symlink path under CDPATH=." sh -c 'CDPATH=. git salvage _pre worktree remove -f cur && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 1'
+wt_repo
+printf 'main\n' >>tracked
+check "worktree remove: the main worktree is not saved" pre_count 0 worktree remove -f "$R"
+wt_repo
+rm -rf "$W"
+# By last component: git still lists the worktree, so it is a match.
+out=$(git salvage _pre worktree remove -f "w$N" 2>&1)
+check "worktree remove: directory already gone: no snapshot" test "$(nrefs)" = 0
+check "worktree remove: directory already gone: no output" test -z "$out"
+wt_repo
+printf 'x\n' >>"$W/tracked"
+check "worktree remove via alias" sh -c 'git -c alias.wr="worktree remove -f" salvage _pre wr "$1" 2>/dev/null && test "$(git for-each-ref refs/salvage/ | wc -l)" -eq 1' _ "$W"
+
+# --git-dir / --work-tree name the main worktree; the snapshot is still of $W.
+wt_repo
+printf 'main\n' >>tracked
+printf 'linked\n' >>"$W/tracked"
+check "worktree remove under --git-dir/--work-tree: _pre" \
+	git --git-dir="$R/.git" --work-tree="$R" salvage _pre worktree remove -f "$W" 2>/dev/null
+check "worktree remove under --git-dir/--work-tree: the linked worktree saved" \
+	test "$(git show "$(newest_ref):worktree/tracked" | tail -n 1)" = linked
+# GIT_DIR alone still gets the files right (git takes the cwd as the work
+# tree), but HEAD and the index are the main worktree's.
+check "worktree remove under --git-dir/--work-tree: the linked worktree's HEAD" \
+	test "$(git log -1 --format='%(trailers:key=Salvage-Head,valueonly)' "$(newest_ref)")" = refs/heads/wb
+
+# A bare repository with a linked worktree.
+wt_repo
+B="$WORK/bare$N.git"
+git clone -q --bare "$R" "$B" && git -C "$B" worktree add -q "$WORK/bw$N" main
+printf 'bare\n' >>"$WORK/bw$N/tracked"
+check "worktree remove from a bare repository: _pre" git -C "$B" salvage _pre worktree remove -f "$WORK/bw$N" 2>/dev/null
+check "worktree remove from a bare repository: one snapshot" \
+	test "$(git -C "$B" for-each-ref refs/salvage/ | wc -l | tr -d ' ')" = 1
+
+wt_repo
+printf 'say\n' >>"$W/tracked"
+check "worktree remove: saved line" sh -c 'git salvage _pre worktree remove -f "$1" 2>&1 >/dev/null | grep -qx "git-salvage: saved snapshot 1 (to undo the removal: add the worktree again, then run git salvage restore 1 in it)"' _ "$W"
+wt_repo
+printf 'ro\n' >>"$W/tracked"
+chmod -R a-w .git/objects
+git salvage _pre worktree remove -f "$W" 2>/dev/null
+rc=$?
+chmod -R u+w .git/objects
+check "worktree remove: fail closed" test "$rc" = 1
+
+# A directory that exists but cannot be entered: no cd error on stderr
+# (root can enter it anyway).
+wt_repo
+mkdir noperm && chmod 000 noperm
+out=$(git salvage _pre worktree remove -f noperm 2>&1)
+chmod 755 noperm
+if [ "$(id -u)" != 0 ]; then
+	check "worktree remove: unenterable directory: no output" test -z "$out"
+else
+	skip "worktree remove: unenterable directory: no output" "root enters it"
+fi
+# Under a UTF-8 locale macOS tr fails on an invalid byte, with an error on
+# stderr. Run only where tr does fail that way.
+if ! printf 'A\377\n' | LC_ALL=en_US.UTF-8 tr '[:upper:]' '[:lower:]' >/dev/null 2>&1; then
+	wt_repo
+	out=$(LC_ALL=en_US.UTF-8 git salvage _pre worktree remove -f "$(printf 'w\377')" 2>&1)
+	check "worktree remove: invalid byte under UTF-8: no output" test -z "$out"
+else
+	skip "worktree remove: invalid byte under UTF-8: no output" "tr does not fail here"
+fi
+
+cd "$WORK" || exit 1
+out=$(git salvage _pre worktree remove x 2>&1)
+rc=$?
+check "outside a repo: worktree remove: exit 0" test "$rc" = 0
+check "outside a repo: worktree remove: no output" test -z "$out"
+
+# git-salvage run directly, so a fake git first on PATH is the one it calls
+# (git puts its own exec-path first for `git salvage`).
+mkdir -p "$WORK/oldgit" "$WORK/listfail"
+printf '#!/bin/sh\ncase " $* " in *" worktree list "*-z*) echo "error: unknown switch" >&2; exit 129 ;; esac\nexec "%s" "$@"\n' "$REAL_GIT" >"$WORK/oldgit/git"
+printf '#!/bin/sh\ncase " $* " in *" worktree list "*) echo "fatal: no" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' "$REAL_GIT" >"$WORK/listfail/git"
+chmod +x "$WORK/oldgit/git" "$WORK/listfail/git"
+wt_repo
+printf 'old\n' >>"$W/tracked"
+out=$(PATH="$WORK/oldgit:$PATH" git-salvage _pre worktree remove -f "w$N" 2>&1)
+check "worktree remove: git without list -z: only the saved line" \
+	test "$out" = 'git-salvage: saved snapshot 1 (to undo the removal: add the worktree again, then run git salvage restore 1 in it)'
+check "worktree remove: git without list -z: that worktree saved" \
+	test "$(git show "$(newest_ref):worktree/tracked" | tail -n 1)" = old
+out=$(PATH="$WORK/listfail:$PATH" git-salvage _pre worktree remove -f "w$N" 2>&1)
+rc=$?
+check "worktree remove: worktree list fails: exit 1" test "$rc" = 1
+check "worktree remove: worktree list fails: says why" contains "(git worktree list failed)" "$out"
+check "worktree remove: worktree list fails: git's error not shown" sh -c 'case $1 in *"fatal: no"*) exit 1 ;; esac' _ "$out"
 
 # ------------------------------------------------------ restore's own guarantees
 
@@ -773,6 +999,11 @@ twin "alias from -c" setup_dirty -c alias.nuke='reset --hard' nuke
 twin "commit message spacing" setup_dirty commit -am "$(printf 'two  spaces\n\n  indented')"
 printf 'tracked\n' >"$WORK/pathspec"
 TWIN_IN="$WORK/pathspec" twin "reset --pathspec-from-file=-" setup_staged reset --pathspec-from-file=-
+# The worktree sits inside $R, so the copy between the two runs keeps it.
+setup_worktree() { git worktree add -q -b wb wt && printf 'x\n' >>wt/tracked && printf 'l\n' >wt/x.log; }
+twin "worktree remove -f" setup_worktree worktree remove -f wt
+twin "worktree remove, dirty: refused" setup_worktree worktree remove wt
+twin "worktree list" setup_worktree worktree list --porcelain
 printf 'blob data\n' >"$WORK/blob"
 TWIN_IN="$WORK/blob" twin "hash-object --stdin" setup_clean hash-object --stdin
 
@@ -814,6 +1045,19 @@ rc=$?
 chmod -R u+w .git/objects
 check "shim fail closed: exit 1" test "$rc" = 1
 check "shim fail closed: command not run" same tracked "$WORK/saved.sh2"
+
+# worktree: only remove reaches _pre (a git-salvage that always fails shows
+# which commands do).
+mkdir -p "$WORK/badsalvage" && printf '#!/bin/sh\nexit 1\n' >"$WORK/badsalvage/git-salvage" && chmod +x "$WORK/badsalvage/git-salvage"
+git worktree add -q -b shimwt "$WORK/shimwt$N"
+check "shim: worktree list does not run _pre" \
+	sh -c 'PATH="$1" git worktree list >/dev/null 2>&1' _ "$WORK/badsalvage:$SPATH"
+check "shim: worktree remove runs _pre" \
+	sh -c '! PATH="$1" git worktree remove "$2" >/dev/null 2>&1 && test -d "$2"' _ "$WORK/badsalvage:$SPATH" "$WORK/shimwt$N"
+printf 'via shim\n' >>"$WORK/shimwt$N/tracked"
+before=$(nrefs)
+sgit worktree remove -f "$WORK/shimwt$N" 2>/dev/null
+check "shim: worktree remove -f saved and ran" sh -c 'test "$1" = "$(($2 + 1))" && test ! -e "$3"' _ "$(nrefs)" "$before" "$WORK/shimwt$N"
 
 err=$(sgit --bogus status 2>&1 >/dev/null)
 check "shim: unrecognized option line" contains "git-salvage: unrecognized option '--bogus', no snapshot taken" "$err"

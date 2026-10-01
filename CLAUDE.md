@@ -24,7 +24,8 @@ bash tests/run.sh          # prints "tests: N/M passed"; N must equal M
 shellcheck bin/git-salvage shim/git tests/run.sh
 ```
 
-Read the `N/M` line itself; a smaller M means a section aborted.
+Read the `N/M` line itself; a smaller M means a section aborted, unless
+`SKIP` lines (checks that cannot run on this platform) account for it.
 After adding a test, prove it can fail (mutate the code, see it red).
 
 `dev/mutate.sh` runs the mutation battery; a full run rewrites the committed

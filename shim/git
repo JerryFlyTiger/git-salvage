@@ -82,10 +82,15 @@ status | log | diff | show | add | commit | fetch | push | pull | rev-parse | \
 	grep | shortlog | rev-list | for-each-ref | show-ref | symbolic-ref | \
 	update-index | diff-index | diff-files | diff-tree | merge-base | name-rev | \
 	reflog | init | clone | help | version | var | hash-object | check-ignore | \
-	check-attr | worktree | submodule | notes | format-patch | apply | mv | gc | \
+	check-attr | submodule | notes | format-patch | apply | mv | gc | \
 	fsck | count-objects | credential | bisect | repack | prune | maintenance | \
 	salvage)
 	exec "$REAL_GIT" "$@"
+	;;
+# Only `worktree remove` deletes files; `worktree list` is polled.
+worktree)
+	j=$((i + 1))
+	[ "$j" -le $# ] && [ "${!j}" = remove ] || exec "$REAL_GIT" "$@"
 	;;
 esac
 

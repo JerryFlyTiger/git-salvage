@@ -259,13 +259,13 @@ SAFE_CMDS=" status log diff show add commit fetch push pull rev-parse ls-files
  ls-tree cat-file config remote tag describe blame grep shortlog rev-list
  for-each-ref show-ref symbolic-ref update-index diff-index diff-files
  diff-tree merge-base name-rev reflog init clone help version var hash-object
- check-ignore check-attr worktree submodule notes bisect format-patch apply
+ check-ignore check-attr submodule notes bisect format-patch apply
  mv gc fsck count-objects repack prune maintenance credential salvage "
 
 # Destructive-capable commands: never alias-expanded (git ignores an alias
 # that shadows a builtin, measured in dev/measure-premise.sh Q1).
 TRIGGER_CMDS=" reset checkout restore switch clean rm merge rebase cherry-pick
- revert am stash branch "
+ revert am stash branch worktree "
 
 # Short options that take an argument, per command: a cluster stops there.
 short_arg_letters() {
@@ -326,7 +326,7 @@ has_opt() { # has_opt <opt>... : any of them present in OPTS
 }
 
 # Decides what to record for the triggering argv. Sets PRE_KIND to
-# none|worktree|stash-drop|stash-clear|branch-delete|branch-move and
+# none|worktree|worktree-remove|stash-drop|stash-clear|branch-delete|branch-move and
 # PRE_IGNORED; leaves the command's own args in OPTS/ARGS.
 classify() {
 	PRE_KIND=none
@@ -374,9 +374,84 @@ classify() {
 			PRE_KIND=branch-move
 		fi
 		;;
+	worktree)
+		# Even without -f, remove deletes ignored files (measured,
+		# dev/measure-worktree-remove.sh P5).
+		if [ "${ARGS[0]:-}" = remove ]; then
+			PRE_KIND=worktree-remove
+			PRE_IGNORED=1
+			PRE_UNTRACKED=1
+		fi
+		;;
 	esac
 	return 0
 }
+
+# snapshot_removed_worktree <display> <arg>: snapshots every linked worktree
+# that `git worktree remove <arg>` could mean. git takes a unique match of
+# <arg> against the end of a worktree's path before <arg> as a path from the
+# cwd, both ignoring case where core.ignorecase is set (measured,
+# dev/measure-worktree-remove.sh N1, N2, N6-N8). Both kinds of match are
+# saved, and both always ignore case. Adds to SAVED. Changes the cwd and
+# the repository: call last.
+snapshot_removed_worktree() {
+	local display=$1 arg=$2 larg real='' d line p delim='' first=1 total=0
+	local paths=()
+	# No <wt> or an empty one: git removes nothing (measured, N9). ./ below
+	# would make it the cwd.
+	[ -n "$arg" ] || return 0
+	GITDIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 0
+	# ./ keeps CDPATH out of it: a CDPATH hit makes cd print the directory.
+	case $arg in /*) d=$arg ;; *) d=./$arg ;; esac
+	# pwd -P keeps the letter case it was given (macOS), so lowercase it.
+	if [ -d "$d" ]; then real=$(cd -- "$d" 2>/dev/null && lower "$(pwd -P)") || real=''; fi
+	larg=$(lower "$arg")
+	mktmp || { SNAP_ERR="cannot create a temporary file in $GITDIR"; return 1; }
+	if ! git worktree list --porcelain -z >"$TMP_LAST" 2>/dev/null; then
+		# -z is git 2.36+. Before it, a path was printed as is, one field
+		# per line.
+		delim=$'\n'
+		git worktree list --porcelain >"$TMP_LAST" 2>/dev/null ||
+			{ SNAP_ERR="git worktree list failed"; return 1; }
+	fi
+	while IFS= read -r -d "$delim" line; do
+		case $line in
+		'worktree '*) p=${line#worktree } ;;
+		*) continue ;;
+		esac
+		# The first entry is the main worktree, which remove refuses.
+		if [ "$first" = 1 ]; then
+			first=0
+			continue
+		fi
+		case /$(lower "$p") in
+		*/"$larg")
+			paths+=("$p")
+			continue
+			;;
+		esac
+		if [ -n "$real" ] && [ "$(cd -- "$p" 2>/dev/null && lower "$(pwd -P)")" = "$real" ]; then
+			paths+=("$p")
+		fi
+	done <"$TMP_LAST"
+	# Each snapshot runs in its own worktree, which the caller's
+	# --git-dir / --work-tree (exported by git) must not override.
+	unset GIT_DIR GIT_WORK_TREE
+	for p in ${paths[@]+"${paths[@]}"}; do
+		# Gone already (nothing to save), or not enterable: git cannot
+		# remove it either.
+		cd -- "$p" 2>/dev/null || continue
+		REPO_READY=0
+		repo_setup || continue
+		snapshot_worktree "$display" "$PRE_IGNORED" "$PRE_UNTRACKED" || return 1
+		total=$((total + SAVED))
+	done
+	SAVED=$total
+}
+
+# ASCII only, as git folds case. Under a UTF-8 locale, macOS tr stops at an
+# invalid byte with an error on stderr (measured); LC_ALL=C cannot.
+lower() { printf '%s\n' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 
 stash_spec() { # <word or empty> -> revision
 	case ${1:-} in
@@ -410,7 +485,8 @@ cmd_pre() {
 	split_args "$@"
 	classify
 	[ "$PRE_KIND" = none ] && return 0
-	repo_setup || return 0
+	# A bare repository can have linked worktrees.
+	[ "$PRE_KIND" = worktree-remove ] || repo_setup || return 0
 
 	SAVED=0
 	SNAP_ERR=
@@ -418,6 +494,9 @@ cmd_pre() {
 	case $PRE_KIND in
 	worktree)
 		snapshot_worktree "$display" "$PRE_IGNORED" "$PRE_UNTRACKED" || ok=1
+		;;
+	worktree-remove)
+		snapshot_removed_worktree "$display" "${ARGS[1]:-}" || ok=1
 		;;
 	stash-drop)
 		spec=$(stash_spec "${ARGS[1]:-}")
@@ -461,7 +540,9 @@ cmd_pre() {
 	if [ "$SAVED" -gt 0 ]; then
 		retention
 		if ! is_quiet; then
-			if [ "$SAVED" = 1 ]; then
+			if [ "$SAVED" = 1 ] && [ "$PRE_KIND" = worktree-remove ]; then
+				err "saved snapshot 1 (to undo the removal: add the worktree again, then run git salvage restore 1 in it)"
+			elif [ "$SAVED" = 1 ]; then
 				err "saved snapshot 1 (undo with: git salvage restore 1)"
 			else
 				err "saved snapshots 1-$SAVED (see: git salvage list)"

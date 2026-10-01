@@ -21,6 +21,12 @@ FILTER=${1:-}
 JOBS=${JOBS:-4}
 MUT_TIMEOUT=${MUT_TIMEOUT:-300}
 I=0
+# A mutation that hangs the suite must end as TIMEOUT. timeout(1) signals the
+# whole process group; nothing short of it is used.
+TIMEOUT_CMD=$(command -v timeout || command -v gtimeout) || {
+	echo "dev/mutate.sh: needs timeout or gtimeout (GNU coreutils)" >&2
+	exit 1
+}
 
 # mut <name> <file> <expected-fail-regex> <perl -0pe expression>
 mut() {
@@ -47,7 +53,7 @@ mut() {
 	esac
 	(
 		start=$(date +%s)
-		timeout "$MUT_TIMEOUT" /bin/bash "$d/tests/run.sh" >"$d/log" 2>&1
+		"$TIMEOUT_CMD" "$MUT_TIMEOUT" /bin/bash "$d/tests/run.sh" >"$d/log" 2>&1
 		rc=$?
 		printf '%s %s\n' "$(($(date +%s) - start))" "$name" >"$d/time"
 		if [ "$rc" = 124 ]; then
@@ -118,6 +124,83 @@ mut "-h after an option not seen" $S 'reset --help' \
 mut "rm -f not recorded" $S 'rm -f' \
 	's/\trm\) has_opt -f --force && PRE_KIND=worktree ;;\n//'
 
+# --- worktree remove
+mut "worktree remove not recorded" $S 'worktree remove -f: one snapshot' \
+	's/\t\t\tPRE_KIND=worktree-remove\n//'
+mut "worktree not a trigger command" $S 'worktree remove -f: one snapshot' \
+	's/ revert am stash branch worktree "/ revert am stash branch "/'
+mut "worktree remove: ignored files not saved" $S 'ignored file (only: file saved|too)' \
+	's/\t\t\tPRE_IGNORED=1\n//'
+mut "worktree remove: untracked not at risk" $S 'ignored file only: snapshot' \
+	's/(PRE_IGNORED=1\n)\t\t\tPRE_UNTRACKED=1\n/$1/'
+mut "worktree remove: no last-component match" $S 'by last path component' \
+	's/\t\tcase \/\$\(lower "\$p"\) in\n\t\t\*\/"\$larg"\)\n\t\t\tpaths\+=\("\$p"\)\n\t\t\tcontinue\n\t\t\t;;\n\t\tesac\n//'
+mut "worktree remove: argument case kept" $S 'other letter case' \
+	's/larg=\$\(lower "\$arg"\)/larg=\$arg/'
+mut "worktree remove: path case kept" $S 'other letter case' \
+	's/case \/\$\(lower "\$p"\) in/case \/\$p in/'
+mut "worktree remove: no path match" $S 'relative path through|from inside|trailing slash|disagree: both' \
+	's/if \[ -n "\$real" \] && \[ "\$\(cd/if false \&\& [ "\$(cd/'
+mut "worktree remove: path compare keeps case" $S 'relative path in other letter case' \
+	's/real=\$\(cd -- "\$d" 2>\/dev\/null && lower "\$\(pwd -P\)"\)/real=\$(cd -- "\$d" 2>\/dev\/null \&\& pwd -P)/'
+mut "worktree remove: loop side of the path compare keeps case" $S 'relative path in other letter case|entered in other letter case' \
+	's/\[ "\$\(cd -- "\$p" 2>\/dev\/null && lower "\$\(pwd -P\)"\)"/[ "\$(cd -- "\$p" 2>\/dev\/null \&\& pwd -P)"/'
+mut "worktree remove: cd error in the argument shown" $S 'unenterable directory: no output' \
+	's/real=\$\(cd -- "\$d" 2>\/dev\/null && lower/real=\$(cd -- "\$d" \&\& lower/'
+mut "worktree remove: lower under the caller's locale" $S 'invalid byte under UTF-8' \
+	's/LC_ALL=C tr /tr /'
+mut "worktree remove: empty argument read as ." $S 'with (no|an empty) path: no snapshot' \
+	's/\t\[ -n "\$arg" \] \|\| return 0\n//'
+mut "worktree remove: absolute path read as relative" $S 'absolute path with trailing slash' \
+	's/case \$arg in \/\*\) d=\$arg ;; \*\) d=\.\/\$arg ;; esac/d=.\/\$arg/'
+mut "worktree remove: cd error in the path compare shown" $S 'stale worktree: only the saved line' \
+	's/\[ "\$\(cd -- "\$p" 2>\/dev\/null && lower/[ "\$(cd -- "\$p" \&\& lower/'
+mut "worktree remove: list -z error shown" $S 'git without list -z: only the saved line' \
+	's/git worktree list --porcelain -z >"\$TMP_LAST" 2>\/dev\/null/git worktree list --porcelain -z >"\$TMP_LAST"/'
+mut "worktree remove: list error shown" $S "list fails: git's error not shown" \
+	's/git worktree list --porcelain >"\$TMP_LAST" 2>\/dev\/null/git worktree list --porcelain >"\$TMP_LAST"/'
+# Three worktree checks run only where they can fail (the suite prints a
+# SKIP line otherwise): "entered in other letter case" (case-insensitive
+# file system), "unenterable directory" (not root), "invalid byte under
+# UTF-8" (a tr that fails there, as macOS's does). So on Linux "lower under
+# the caller's locale" comes out SURVIVED, and as root "cd error in the
+# argument shown" does too. The committed results are from macOS, not root.
+mut "worktree remove: CDPATH applies" $S 'CDPATH' \
+	's/case \$arg in \/\*\) d=\$arg ;; \*\) d=\.\/\$arg ;; esac/d=\$arg/'
+mut "worktree remove: no fallback without -z" $S 'git without list -z' \
+	's/\t\tgit worktree list --porcelain >"\$TMP_LAST"/\t\tfalse/'
+mut "worktree remove: fallback read as -z" $S 'git without list -z: that worktree' \
+	's/\t\tdelim=\$.\\n.\n//'
+mut "worktree remove: list failure ignored" $S 'worktree list fails' \
+	's/ \|\|\n\t\t\t\{ SNAP_ERR="git worktree list failed"; return 1; \}/ || true/'
+mut "worktree remove: outside a repo not skipped" $S 'outside a repo: worktree remove' \
+	's/(GITDIR=\$\(git rev-parse --absolute-git-dir 2>\/dev\/null\)) \|\| return 0/$1/'
+mut "worktree remove: temp file outside TMPFILES" $S 'worktree remove: no temp files' \
+	's/\tmktmp \|\| \{ SNAP_ERR="cannot create a temporary file in \$GITDIR"; return 1; \}\n\tif ! git/\tTMP_LAST=\$(mktemp "\$GITDIR\/salvage-tmp.XXXXXX")\n\tif ! git/'
+mut "worktree remove: main worktree saved" $S 'main worktree is not saved' \
+	's/\t\tif \[ "\$first" = 1 \]; then\n\t\t\tfirst=0\n\t\t\tcontinue\n\t\tfi\n//'
+mut "worktree remove: caller's GIT_DIR kept" $S 'under --git-dir/--work-tree: the linked' \
+	's/\tunset GIT_DIR GIT_WORK_TREE\n//'
+mut "worktree remove: only GIT_DIR unset" $S 'under --git-dir/--work-tree: the linked' \
+	's/\tunset GIT_DIR GIT_WORK_TREE\n/\tunset GIT_DIR\n/'
+mut "worktree remove: only GIT_WORK_TREE unset" $S 'under --git-dir/--work-tree: the linked' \
+	's/\tunset GIT_DIR GIT_WORK_TREE\n/\tunset GIT_WORK_TREE\n/'
+mut "worktree remove: bare repository skipped" $S 'from a bare repository' \
+	's/\[ "\$PRE_KIND" = worktree-remove \] \|\| repo_setup/repo_setup/'
+mut "worktree remove: cd error shown" $S 'already gone: no output' \
+	's/cd -- "\$p" 2>\/dev\/null \|\| continue/cd -- "\$p" || continue/'
+mut "worktree remove: snapshot failure ignored" $S 'worktree remove: fail closed' \
+	's/snapshot_removed_worktree "\$display" "\$\{ARGS\[1\]:-\}" \|\| ok=1/snapshot_removed_worktree "\$display" "\${ARGS[1]:-}" || true/'
+mut "worktree remove: failure inside the loop ignored" $S 'worktree remove: fail closed' \
+	's/"\$PRE_UNTRACKED" \|\| return 1\n\t\ttotal=/"\$PRE_UNTRACKED" || true\n\t\ttotal=/'
+mut "worktree remove: count not summed" $S 'disagree: saved line' \
+	's/\tSAVED=\$total\n//'
+mut "worktree remove: generic undo line" $S 'worktree remove: saved line' \
+	's/\] && \[ "\$PRE_KIND" = worktree-remove \]; then/] \&\& false; then/'
+# Not listed: dropping the `= remove` test in classify. Every other worktree
+# subcommand either has no second word or names a path that is not yet a
+# worktree (`add`), so the over-trigger finds nothing to save: equivalent.
+
 # --- fail closed
 mut "fail closed returns 0" $S 'fail closed: exit 1' \
 	's/(was not run\."\n.*\n)\t\treturn 1/$1\t\treturn 0/'
@@ -181,6 +264,13 @@ mut "shim: _pre failure ignored" $G 'shim fail closed' \
 	's/<\/dev\/null \|\| exit 1/<\/dev\/null || true/'
 mut "shim: reset in the fast path" $G 'shim: reset --hard saved' \
 	's/\nstatus \| log \|/\nreset | status | log |/'
+# Not listed: dropping `[ "$j" -le $# ]` in the shim's worktree case. The
+# shim has no `set -u`, and bash 3.2 expands an out-of-range ${!j} to
+# nothing, which is not `remove`: equivalent.
+mut "shim: worktree remove in the fast path" $G 'shim: worktree remove (runs _pre|-f saved)' \
+	's/\t\[ "\$j" -le \$# \] && \[ "\$\{!j\}" = remove \] \|\| exec/\texec/'
+mut "shim: every worktree command reaches _pre" $G 'shim: worktree list does not run _pre' \
+	's/# Only `worktree remove`[^\n]*\nworktree\)\n[^\n]*\n[^\n]*\n\t;;\n//'
 mut "shim: REAL_GIT pointing at itself accepted" $G 'GIT_SALVAGE_REAL_GIT' \
 	's/ &&\n\t\t! \[ "\$GIT_SALVAGE_REAL_GIT" -ef "\$self" \]; then/; then/'
 mut "shim: empty PATH entry skipped" $G 'empty PATH entry searched as \.' \

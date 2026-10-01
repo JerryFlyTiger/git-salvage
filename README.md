@@ -104,10 +104,17 @@ already taken stay in each repo under `refs/salvage/`.
 | `stash drop`, `stash pop`, `stash clear` | always (the stash entries) |
 | `branch -d/-D` | always (the branch tips) |
 | `branch -M/-C`, or `-m/-c` with `-f` | when the target branch exists |
+| `worktree remove` | always (that worktree, ignored files included) |
 
 Starting a merge or rebase takes no snapshot: git either refuses to start
 over uncommitted changes or leaves them in place (measured; see
 `docs/DESIGN.md`). Only the way out, `--abort` or `--skip`, can throw them away.
+
+`worktree remove` deletes the worktree's ignored files even without `-f`
+(measured), so it is always caught. To undo it, add the worktree again
+(`git worktree add <path> <branch>`) and run `git salvage restore N` inside
+it. Ignored files can be large (`node_modules`, build output); each such
+removal stores them as a snapshot until it is pruned.
 
 One level of alias is followed (`alias.nuke = reset --hard` is caught).
 Nothing is saved when there is nothing uncommitted, or when the state is the
@@ -164,7 +171,8 @@ file and not the index), loads nothing from the network, and needs no server.
 - Only `git` found through `PATH` is covered. A program that runs git by an
   absolute path, bundles its own git, or uses a git library (libgit2, JGit,
   go-git) bypasses the shim. Hooks run by git bypass it too.
-- Not covered: `worktree remove --force`, `checkout-index -f`, `read-tree -u`,
+- Not covered: commits that only a removed detached worktree reached,
+  `checkout-index -f`, `read-tree -u`,
   `gc --prune=now`, `reflog expire`, and anything outside git (`rm`, an editor).
 - Nested repositories inside untracked directories are recorded as links;
   their contents are not saved.

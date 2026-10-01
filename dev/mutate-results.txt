@@ -1,4 +1,4 @@
-# dev/mutate.sh 2026-09-30, git version 2.55.0, JOBS=4, slowest 49s of 300s
+# dev/mutate.sh 2026-10-02, git version 2.55.0, JOBS=4, slowest 40s of 300s
 KILLED       -- does not end options
 KILLED       -h after an option not seen
 KILLED       -h/--help triggers
@@ -45,12 +45,14 @@ KILLED       rm -f not recorded
 KILLED       shim: _pre failure ignored
 KILLED       shim: -C read as value-less
 KILLED       shim: empty PATH entry skipped
+KILLED       shim: every worktree command reaches _pre
 KILLED       shim: GIT_SALVAGE_REAL_GIT ignored
 KILLED       shim: globals not passed to _pre
 KILLED       shim: no unrecognized-option line
 KILLED       shim: REAL_GIT pointing at itself accepted
 KILLED       shim: reset in the fast path
 KILLED       shim: trailing PATH entry searched
+KILLED       shim: worktree remove in the fast path
 KILLED       snapshot failure ignored
 KILLED       stash drop <n> ignores n
 KILLED       temp files not cleaned up
@@ -94,3 +96,36 @@ KILLED       view: one trailer key only
 KILLED       view: reflog ids not drawn
 KILLED       view: status may write the index
 KILLED       view: unborn HEAD given to log -g
+KILLED       worktree not a trigger command
+KILLED       worktree remove not recorded
+KILLED       worktree remove: absolute path read as relative
+KILLED       worktree remove: argument case kept
+KILLED       worktree remove: bare repository skipped
+KILLED       worktree remove: caller's GIT_DIR kept
+KILLED       worktree remove: cd error in the argument shown
+KILLED       worktree remove: cd error in the path compare shown
+KILLED       worktree remove: cd error shown
+KILLED       worktree remove: CDPATH applies
+KILLED       worktree remove: count not summed
+KILLED       worktree remove: empty argument read as .
+KILLED       worktree remove: failure inside the loop ignored
+KILLED       worktree remove: fallback read as -z
+KILLED       worktree remove: generic undo line
+KILLED       worktree remove: ignored files not saved
+KILLED       worktree remove: list -z error shown
+KILLED       worktree remove: list error shown
+KILLED       worktree remove: list failure ignored
+KILLED       worktree remove: loop side of the path compare keeps case
+KILLED       worktree remove: lower under the caller's locale
+KILLED       worktree remove: main worktree saved
+KILLED       worktree remove: no fallback without -z
+KILLED       worktree remove: no last-component match
+KILLED       worktree remove: no path match
+KILLED       worktree remove: only GIT_DIR unset
+KILLED       worktree remove: only GIT_WORK_TREE unset
+KILLED       worktree remove: outside a repo not skipped
+KILLED       worktree remove: path case kept
+KILLED       worktree remove: path compare keeps case
+KILLED       worktree remove: snapshot failure ignored
+KILLED       worktree remove: temp file outside TMPFILES
+KILLED       worktree remove: untracked not at risk

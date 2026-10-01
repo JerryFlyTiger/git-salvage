@@ -104,7 +104,7 @@ cp "$GIT_DIR/index" "$tmp"; T_i=$(GIT_INDEX_FILE=$tmp git write-tree)  # may fai
 ```
 
 - `-f` (include ignored files) only when the triggering command will delete
-  ignored files: `clean` with `-x` or `-X`.
+  ignored files: `clean` with `-x` or `-X`, and `worktree remove`.
 - A 0-byte `GIT_INDEX_FILE` is an error ("index file smaller than expected"),
   so with no real index the temp file is deleted and git starts from none.
 - Run from the work-tree top level so `add -A` covers the whole tree.
@@ -112,14 +112,15 @@ cp "$GIT_DIR/index" "$tmp"; T_i=$(GIT_INDEX_FILE=$tmp git write-tree)  # may fai
   `T_w == T_i == HEAD^{tree}` (unborn HEAD: both equal the empty tree).
   Untracked files only count as uncommitted for commands that can delete
   them: `clean`, `reset --hard`, `checkout -f/--force`,
-  `switch -f/--force/--discard-changes`. Otherwise every branch switch with an
+  `switch -f/--force/--discard-changes`, `worktree remove`. Otherwise every branch switch with an
   untracked file lying around would print a new snapshot. `git salvage
   snapshot` and restore's own pre-restore snapshot always count them. When a
   snapshot is taken, it always contains the untracked files.
 - **Skip** when `T_w`/`T_i` equal those of the newest existing worktree
   snapshot (repeated command on an unchanged tree).
 - Bare repository, or not inside a repository: no snapshot; the command runs
-  and git reports whatever it reports.
+  and git reports whatever it reports. Exception: `worktree remove` from a
+  bare repository saves the linked worktree (see below).
 
 ### Cost on large repos (measured, `dev/measure-perf.sh`)
 
@@ -176,6 +177,7 @@ snapshot. An argument after `--` is never read as an option.
 | `stash clear` | always | one stash record per entry |
 | `branch -d/-D/--delete <names>` | always (`-r`: `refs/remotes/`) | branch, one per existing name |
 | `branch -M/-C <old> <new>`, or `-m/-c` with `-f` | when `<new>` exists | branch (old tip of `<new>`) |
+| `worktree remove <wt>` | always (ignored files included) | worktree, one per linked worktree `<wt>` can name |
 
 Plain `-m`/`-c` refuse an existing `<new>` (exit 128, measured), so they
 record nothing without `-f`.
@@ -204,6 +206,73 @@ The step that can throw work away is the way out, `--abort` and `--skip`,
 which the trigger table above catches. `pull`, `cherry-pick`, `revert` and `am` are
 handled the same way; they are not measured here.
 
+### `worktree remove` (measured, `dev/measure-worktree-remove.sh`, git 2.55.0)
+
+| case | exit | the worktree's files |
+|---|---|---|
+| plain remove: modified, staged or untracked file | 128, "contains modified or untracked files, use --force" | kept |
+| plain remove: only an ignored file | 0 | LOST |
+| `-f`: modified or ignored file | 0 | LOST |
+| locked, `-f` | 128, "cannot remove a locked working tree" | kept |
+| locked, `-f -f` / `--force --force` | 0 | LOST |
+| `<wt>` = the worktree's last path component, no such path from cwd | 0 | LOST |
+| `<wt>` = last component of worktree B and, through a symlink in cwd, the path of worktree A | 0 | B LOST, A kept |
+| `<wt>` = last component of two worktrees | 128, "is not a working tree" | both kept |
+| `<wt>` = relative path through `..`, or `.` from inside the worktree | 0 | LOST |
+| `<wt>` = last component with a trailing `/` | 128, "is not a working tree" | kept |
+| `<wt>` = last component in another letter case (macOS, `core.ignorecase=true`) | 0 | LOST |
+| `<wt>` = relative path in another letter case (`../W` for `w`), same | 0 | LOST |
+| `<wt>` = `.` inside the worktree entered as `W` (its `pwd -P` says `W`), same | 0 | LOST |
+| no `<wt>`; `<wt>` = `''` | 129 (usage); 128, "'' is not a working tree" | kept |
+| plain remove, clean detached worktree whose commit no ref reaches | 0 | the commit becomes unreachable (its only reflog goes with the worktree) |
+| the worktree directory is already gone | 0 | (nothing on disk) |
+| `worktree add -f` into an existing non-empty directory | 128, "already exists" | kept |
+
+- Plain `remove` deletes ignored files, so every `worktree remove` triggers,
+  and the snapshot includes ignored files (as `clean -x` does). Untracked
+  files count as uncommitted. A worktree with nothing to lose is skipped by
+  the usual rule.
+- git picks the worktree by a unique match against the end of its path
+  first, by path from the cwd second, both ignoring case where
+  `core.ignorecase` is set. git-salvage does not reproduce that order: it
+  reads `git worktree list --porcelain -z` and saves every linked worktree
+  that matches either way (`/<path>` ends in `/<wt>`, or `pwd -P` of both
+  is the same; each side lowercased). Saving one too many costs a
+  snapshot; picking the wrong one loses work. Both matches always ignore
+  case: on a case-sensitive file system git refuses the other-case name,
+  and the extra snapshot is harmless (it can be large: ignored files).
+  `pwd -P` keeps the letter case it was given (macOS), so it is lowercased
+  too. Lowercasing is ASCII only, under `LC_ALL=C`, as git folds case;
+  under a UTF-8 locale macOS `tr` stops at an invalid byte with an error
+  (measured).
+- No `<wt>`, or an empty one: nothing is saved (git prints its usage, exit
+  129, or says `'' is not a working tree`; measured, N9).
+- The main worktree (the first entry) is never saved: remove refuses it.
+- `-z` is git 2.36+. When it fails, the list is read again without it, one
+  field per line (older git prints paths unquoted, so only a path with a
+  newline is misread). If that fails too, the command is blocked (fail
+  closed).
+- A relative `<wt>` is entered as `./<wt>`, so `CDPATH` never applies (a
+  `CDPATH` hit makes `cd` print the directory, which would spoil the
+  `pwd -P` comparison).
+- Each snapshot runs inside its worktree, with `GIT_DIR` / `GIT_WORK_TREE`
+  unset (git exports them for `--git-dir` / `--work-tree`, which would
+  otherwise point the snapshot at the main worktree). A bare repository can
+  have linked worktrees, so `worktree remove` does not need `_pre` to run in
+  a work tree.
+- A worktree whose directory is gone, or cannot be entered, is skipped
+  (nothing to save; git cannot remove the second either). `cd` errors are
+  silenced, so the shim stays transparent.
+- The shim's fast path still passes every other `worktree` subcommand
+  straight to git: `worktree list` is polled by editors.
+- Undo: `git worktree add <path> <branch>` again, then `git salvage
+  restore N [--index]` inside it. The snapshot's `Salvage-Head` names the
+  branch.
+- Not covered: commits that only a detached worktree's HEAD reaches. Their
+  only reflog is deleted with the worktree (measured, D1). That is
+  committed work, which git-salvage does not protect; a clean worktree
+  takes no snapshot.
+
 ## Failure policy: fail closed
 
 If a snapshot that *should* be taken fails, the destructive command does
@@ -225,6 +294,9 @@ and execs real git.
 
 - On a saved snapshot, one stderr line:
   `git-salvage: saved snapshot 1 (undo with: git salvage restore 1)`.
+  For `worktree remove` (git may still refuse; the snapshot is taken first):
+  `git-salvage: saved snapshot 1 (to undo the removal: add the worktree again, then run git salvage restore 1 in it)`.
+  More than one: `git-salvage: saved snapshots 1-N (see: git salvage list)`.
   `GIT_SALVAGE_QUIET=1` or `salvage.quiet=true` suppresses it.
 - Otherwise the shim adds nothing: real git's stdout, stderr and exit code
   reach the caller unchanged, because the shim `exec`s it.
@@ -493,7 +565,8 @@ Known limits of the page (reviewed, not fixed):
 - Anything that runs git by absolute path (`/usr/bin/git`), or through a
   library (libgit2, JGit, go-git), bypasses the shim. IDEs usually look git up
   on PATH, but some have a "git path" setting or bundle their own git.
-- Not covered: `worktree remove --force`, `checkout-index -f`, `read-tree -u`,
+- Not covered: commits that only a removed detached worktree reached (see
+  "`worktree remove`"), `checkout-index -f`, `read-tree -u`,
   `gc --prune=now`, `reflog expire`, and plain file operations outside git
   (`rm`, an editor overwriting a file).
 - Hooks run by git reach real git, not the shim: git puts its exec-path in
@@ -514,7 +587,9 @@ Known limits of the page (reviewed, not fixed):
   `dev/measure-shells.sh`); only the shim's is tested.
 - Nested repositories inside untracked directories are recorded as gitlinks;
   their contents are not saved.
-- Snapshots keep large untracked files alive until pruned.
+- Snapshots keep large untracked files alive until pruned. For `worktree
+  remove` that includes ignored files (`node_modules`, build output), on
+  every removal of a worktree that has them.
 
 ## Testing
 
@@ -528,23 +603,34 @@ salvage line) and exit code.
 `dev/mutate.sh` runs every mutation against the suite, `JOBS` at a time, each
 under `MUT_TIMEOUT` (default 300 s); a full run writes
 `dev/mutate-results.txt`, whose first line records the date, git version,
-`JOBS` and the slowest run. Measured 2026-09-29 to 09-30 (Apple M4, 10
-cores, git 2.55.0): the suite alone takes 49 s; the slowest mutation run was
-46-57 s at `JOBS=4` across the committed full runs, well under the timeout.
+`JOBS` and the slowest run. Measured 2026-09-29 to 10-02 (Apple M4, 10
+cores, git 2.55.0): the suite alone takes 27-49 s; the slowest mutation run
+was 40-74 s at `JOBS=4` across the full runs, well under the timeout.
 The summary warns when the slowest run passes half of `MUT_TIMEOUT`.
 
+Test tooling:
+- `check` writes its FAIL line to fd 3 (the suite's stdout), so
+  `check ... >/dev/null` hides only the command's output and
+  `dev/mutate.sh`, which reads `FAIL ` lines, sees every red check. Before
+  this, a mutation that turned only such a check red was reported ABORTED
+  (measured: a restore that always fails gave 44 red checks, 31 FAIL lines).
+- `bounded` in `tests/run.sh` uses `timeout`, else `gtimeout`, else perl's
+  `alarm` (kept across the `exec`, SIGALRM, exit 142). The perl fallback
+  kills only that process, not its children.
+- `dev/mutate.sh` uses `timeout`, else `gtimeout`, and refuses to run with
+  neither: a hung mutation must end as TIMEOUT, and timeout(1) signals the
+  whole process group, which perl's `alarm` does not.
+
 Known limits of the test tooling (reviewed, not fixed):
-- `check ... >/dev/null` in `tests/run.sh` also hides that check's FAIL
-  line; the `failed: <name>` list before the summary still names it. But
-  `dev/mutate.sh` reads only `FAIL ` lines, so a mutation that turns only
-  such a check red is reported ABORTED, not KILLED.
-- `bounded` in `tests/run.sh` needs `timeout` or `gtimeout`; without either
-  it runs the command unbounded. The "long argument answers fast" check then
-  passes slowly instead of catching a hang, and the shim-execs-itself check
-  and the view js runs would hang the suite instead of failing.
-- `dev/mutate.sh` calls `timeout` with no `gtimeout` fallback, and its own
-  logic has no automated test. Its TIMEOUT / WARNING / results-file handling
-  was checked by hand (`MUT_TIMEOUT=5`).
+- Three worktree checks run only where they can fail and print a `SKIP`
+  line otherwise (case-insensitive file system, not root, a `tr` that fails
+  on an invalid byte under UTF-8). Nothing fails on a SKIP: if a macOS CI
+  runner stops meeting a condition, CI stays green with that check gone,
+  and `dev/mutate.sh` reports the mutation it guards as SURVIVED, the same
+  as a blind spot. The committed results are from macOS, not root.
+- `dev/mutate.sh`'s own logic has no automated test. Its TIMEOUT / WARNING
+  / results-file handling and the gtimeout-only and no-timeout paths were
+  checked by hand (`MUT_TIMEOUT=5`, a PATH without the tool).
 
 Known timing quirk (macOS, not fixed): the first exec of a freshly copied
 script costs 0.35-0.7 s (the OS scans it). One run stalled ~2 min in
